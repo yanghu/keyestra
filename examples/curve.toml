@@ -1,0 +1,17 @@
+[input]
+name = "Roland FP-10"
+
+[output]
+name = "FP10 Mapped"
+
+[mapping]
+mode = "piecewise"
+points = [
+  [0, 0],
+  [1, 0],
+  [18, 30],
+  [32, 57],
+  [50, 84],
+  [108, 127],
+  [127, 127],
+]

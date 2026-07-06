@@ -1,0 +1,14 @@
+[package]
+name = "fp10-map"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.4"
+midir = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+tao = "0.35.3"
+toml = "0.8"
+tray-icon = "0.24.1"
