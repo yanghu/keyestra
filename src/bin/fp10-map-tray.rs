@@ -96,6 +96,7 @@ impl MapperProcess {
             .arg(&self.output)
             .arg("--curve")
             .arg(&self.curve)
+            .arg("--monitor")
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
 
