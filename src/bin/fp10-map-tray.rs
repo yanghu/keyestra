@@ -2,6 +2,7 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
+use std::net::UdpSocket;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -35,6 +36,9 @@ struct Cli {
     #[arg(long = "monitor-port", default_value_t = 8770)]
     monitor_port: u16,
 
+    #[arg(long = "monitor-host", default_value = "0.0.0.0")]
+    monitor_host: String,
+
     #[arg(long)]
     curve: Option<PathBuf>,
 
@@ -56,6 +60,7 @@ struct MapperProcess {
 struct MonitorProcess {
     child: Option<Child>,
     input: String,
+    host: String,
     port: u16,
     log_path: PathBuf,
 }
@@ -147,10 +152,11 @@ impl MapperProcess {
 }
 
 impl MonitorProcess {
-    fn new(input: String, port: u16, log_path: PathBuf) -> Self {
+    fn new(input: String, host: String, port: u16, log_path: PathBuf) -> Self {
         Self {
             child: None,
             input,
+            host,
             port,
             log_path,
         }
@@ -169,6 +175,8 @@ impl MonitorProcess {
         command
             .arg("--in")
             .arg(&self.input)
+            .arg("--host")
+            .arg(&self.host)
             .arg("--port")
             .arg(self.port.to_string())
             .stdout(Stdio::from(stdout))
@@ -368,6 +376,13 @@ impl Supervisor {
     fn monitor_url(&self) -> String {
         format!("http://localhost:{}/", self.monitor.port)
     }
+
+    fn phone_url_text(&self) -> String {
+        match local_lan_ip() {
+            Some(ip) => format!("Phone URL: http://{}:{}/", ip, self.monitor.port),
+            None => format!("Phone URL: use this PC IP:{}", self.monitor.port),
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -388,7 +403,12 @@ fn main() -> Result<()> {
     let monitor_log_path = app_data.join("monitor.log");
     let curve = cli.curve.unwrap_or_else(default_curve_path);
     let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log_path);
-    let monitor = MonitorProcess::new(cli.monitor_input, cli.monitor_port, monitor_log_path);
+    let monitor = MonitorProcess::new(
+        cli.monitor_input,
+        cli.monitor_host,
+        cli.monitor_port,
+        monitor_log_path,
+    );
 
     run_tray(Supervisor::new(mapper, monitor))
 }
@@ -399,6 +419,7 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
 
     let mapper_status_item = MenuItem::new("Mapper: Starting", false, None);
     let monitor_status_item = MenuItem::new("Monitor: Starting", false, None);
+    let phone_url_item = MenuItem::new(supervisor.phone_url_text(), false, None);
     let open_monitor_item = MenuItem::new("Open monitor page", true, None);
     let restart_all_item = MenuItem::new("Restart all", true, None);
     let start_item = MenuItem::new("Start mapper", true, None);
@@ -414,6 +435,7 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     tray_menu.append_items(&[
         &mapper_status_item,
         &monitor_status_item,
+        &phone_url_item,
         &PredefinedMenuItem::separator(),
         &open_monitor_item,
         &restart_all_item,
@@ -551,6 +573,12 @@ fn open_url(url: &str) -> Result<()> {
         Command::new("xdg-open").arg(url).spawn()?;
         return Ok(());
     }
+}
+
+fn local_lan_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    Some(socket.local_addr().ok()?.ip().to_string())
 }
 
 fn default_curve_path() -> PathBuf {

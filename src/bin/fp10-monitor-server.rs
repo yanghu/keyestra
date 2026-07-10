@@ -4,7 +4,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -26,6 +26,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 8770, help = "Local HTTP port")]
     port: u16,
+
+    #[arg(long, default_value = "0.0.0.0", help = "HTTP bind host")]
+    host: String,
 }
 
 #[derive(Debug, Clone)]
@@ -223,10 +226,15 @@ fn main() -> Result<()> {
         )
         .with_context(|| format!("Failed to open MIDI input {}", input_name))?;
 
-    let address = format!("127.0.0.1:{}", cli.port);
+    let address = format!("{}:{}", cli.host, cli.port);
     let listener = TcpListener::bind(&address).with_context(|| format!("Failed to bind {}", address))?;
     println!("Monitoring MIDI input: {}", input_name);
     println!("Dashboard: http://localhost:{}/", cli.port);
+    if cli.host == "0.0.0.0" {
+        if let Some(ip) = local_lan_ip() {
+            println!("Phone/LAN dashboard: http://{}:{}/", ip, cli.port);
+        }
+    }
 
     for stream in listener.incoming() {
         match stream {
@@ -304,6 +312,7 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|path| path.split('?').next())
         .unwrap_or("/");
 
     match path {
@@ -318,6 +327,7 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
                 .unwrap_or_else(|_| "{\"error\":\"state lock poisoned\"}".to_string());
             respond(&mut stream, "200 OK", "application/json; charset=utf-8", &json)
         }
+        "/events" => respond_events(stream, state),
         "/seed-log" => {
             let body = match seed_from_tray_log(&state) {
                 Ok(count) => format!("{{\"loaded\":{}}}", count),
@@ -326,6 +336,43 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
             respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body)
         }
         _ => respond(&mut stream, "404 Not Found", "text/plain; charset=utf-8", "Not found"),
+    }
+}
+
+fn respond_events(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Result<()> {
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n"
+    )?;
+    stream.flush()?;
+
+    let mut last_json = String::new();
+    let mut ticks_since_heartbeat = 0_u8;
+    loop {
+        let json = state
+            .lock()
+            .map(|mut state| {
+                state.flush_ready_chord(now_ms());
+                state.to_json()
+            })
+            .unwrap_or_else(|_| "{\"error\":\"state lock poisoned\"}".to_string());
+
+        if json != last_json {
+            write!(stream, "event: state\ndata: {}\n\n", json)?;
+            stream.flush()?;
+            last_json = json;
+            ticks_since_heartbeat = 0;
+        } else {
+            ticks_since_heartbeat = ticks_since_heartbeat.saturating_add(1);
+            if ticks_since_heartbeat >= 25 {
+                write!(stream, ": heartbeat\n\n")?;
+                stream.flush()?;
+                ticks_since_heartbeat = 0;
+            }
+        }
+
+        thread::sleep(Duration::from_millis(120));
     }
 }
 
@@ -384,6 +431,12 @@ fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str)
         body
     )?;
     Ok(())
+}
+
+fn local_lan_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    Some(socket.local_addr().ok()?.ip().to_string())
 }
 
 fn now_ms() -> u128 {
@@ -628,8 +681,17 @@ const INDEX_HTML: &str = r###"<!doctype html>
       $("history").innerHTML = history.map((group,index)=>`<tr class="group-row"><td colspan="4"><div class="group-meta"><strong>#${history.length-index}</strong><span>${time(group.timeMs)}</span><span>${group.notes.length} 音 · ${group.notes.map(n=>n.name).join(" ")}</span><span>平均 ${group.average}</span><span>差距 ${group.spread}</span></div></td></tr>${group.notes.map(note=>`<tr><td></td><td><span class="pill">${note.name}</span></td><td><div class="history-meter"><span class="${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></span><b>${note.velocity}</b></div></td><td>${note.mark}</td></tr>`).join("")}`).join("");
     }
     function renderRaw(raw,count){ $("rawSummary").textContent=`${count} messages`; $("raw").innerHTML=raw.map(e=>`<div class="raw-row"><span>${time(e.timeMs)}</span><strong>${e.kind}</strong><span>ch ${e.channel}</span><code>${e.bytes}</code></div>`).join(""); }
-    async function tick(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } setTimeout(tick,120); }
-    tick();
+    let pollingTimer = null;
+    let eventSource = null;
+    async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } }
+    function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }
+    function connectEvents(){
+      if(!window.EventSource){ startPolling(); return; }
+      eventSource = new EventSource("/events");
+      eventSource.addEventListener("state",(event)=>{ try{ render(JSON.parse(event.data)); } catch(e){} });
+      eventSource.onerror = ()=>{ $("status").textContent="reconnecting"; if(eventSource){ eventSource.close(); eventSource=null; } startPolling(); setTimeout(()=>{ if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; } connectEvents(); },2500); };
+    }
+    connectEvents();
   </script>
 </body>
 </html>"###;
@@ -701,6 +763,36 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     .raw-row strong { color:var(--ink); } code { color:var(--red); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
     .velocity-pp { background:var(--pp); } .velocity-p { background:var(--p); } .velocity-mp { background:var(--mp); } .velocity-mf { background:var(--mf); } .velocity-f { background:var(--f); } .velocity-ff { background:var(--ff); }
     @media (max-width:860px){ header,.grid,.lower{grid-template-columns:1fr;display:grid;align-items:start;} header{align-items:start;} .tools{justify-content:flex-start;} .raw-row{grid-template-columns:86px 1fr 44px;} code{grid-column:1/-1;} }
+    @media (max-width:700px){
+      body { background:#fff; }
+      main { width:100%; padding:10px; scroll-snap-type:y proximity; }
+      header { position:sticky; top:0; z-index:20; align-items:start; margin:0 -10px 10px; padding:10px; background:rgba(246,247,244,.96); border-bottom:1px solid var(--line); backdrop-filter:blur(8px); }
+      h1 { font-size:22px; }
+      h2 { font-size:15px; }
+      .subtitle { display:none; }
+      .status { max-width:46vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+      .panel { padding:12px; border-radius:8px; box-shadow:none; scroll-snap-align:start; }
+      .heading { margin-bottom:10px; }
+      .grid { gap:10px; }
+      .meter { order:-1; min-height:32vh; display:flex; flex-direction:column; justify-content:center; }
+      .meter strong { font-size:96px; text-align:center; }
+      .meter .bigbar { height:34px; }
+      .dynamic { text-align:center; font-size:34px; }
+      .keyboard { height:42vh; min-height:260px; }
+      .key { width:14px; font-size:10px; }
+      .key .value { max-height:108px; }
+      .cards { grid-template-columns:repeat(auto-fit,minmax(86px,1fr)); gap:6px; }
+      .card { padding:8px; }
+      .timeline { margin-top:10px; }
+      .plot { height:68vh; min-height:420px; }
+      .timeline .heading { display:grid; align-items:start; }
+      .tools { justify-content:stretch; display:grid; grid-template-columns:1fr 1fr 1fr; }
+      .ghost,select { width:100%; height:36px; }
+      .lower { gap:10px; margin-top:10px; }
+      .table-wrap,.raw { max-height:50vh; }
+      th,td { padding:7px 8px; font-size:12px; }
+      .group-meta { gap:7px; }
+    }
   </style>
 </head>
 <body>
@@ -958,8 +1050,17 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     function renderRaw(raw,count){ $("rawSummary").textContent=`${count} messages`; $("raw").innerHTML=raw.map(e=>`<div class="raw-row"><span>${time(e.timeMs)}</span><strong>${e.kind}</strong><span>ch ${e.channel}</span><code>${e.bytes}</code></div>`).join(""); }
     $("clearView").addEventListener("click",async()=>{ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); state.cutoffTimeMs=Date.now(); state.cutoffMessageCount=data.messageCount||0; render({...data,history:[],raw:[],lastNote:null,currentChord:null}); } catch(e){ state.cutoffTimeMs=Date.now(); } });
     $("seedLog").addEventListener("click",async()=>{ const button=$("seedLog"); button.disabled=true; button.textContent="载入中"; try{ const result=await fetch("/seed-log",{cache:"no-store"}).then(r=>r.json()); button.textContent=result.loaded ? `已载入 ${result.loaded}` : "无日志"; } catch(e){ button.textContent="载入失败"; } setTimeout(()=>{ button.disabled=false; button.textContent="载入日志"; },1400); });
-    async function tick(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } setTimeout(tick,120); }
-    tick();
+    let pollingTimer = null;
+    let eventSource = null;
+    async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } }
+    function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }
+    function connectEvents(){
+      if(!window.EventSource){ startPolling(); return; }
+      eventSource = new EventSource("/events");
+      eventSource.addEventListener("state",(event)=>{ try{ render(JSON.parse(event.data)); } catch(e){} });
+      eventSource.onerror = ()=>{ $("status").textContent="reconnecting"; if(eventSource){ eventSource.close(); eventSource=null; } startPolling(); setTimeout(()=>{ if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; } connectEvents(); },2500); };
+    }
+    connectEvents();
   </script>
 </body>
 </html>"####;
