@@ -15,6 +15,55 @@
       </div>
       <div class="status" id="status">连接中</div>
     </header>
+    <section class="mobile-practice" aria-label="移动端练琴反馈">
+      <section class="mobile-hero">
+        <div>
+          <div class="mobile-label">当前反馈</div>
+          <strong id="mobileFeedback">等待输入</strong>
+          <span id="mobileFeedbackDetail">弹几个音后开始分析</span>
+        </div>
+        <div class="mobile-dynamic">
+          <b id="mobileDynamic">-</b>
+          <span id="mobileVelocity">0</span>
+        </div>
+      </section>
+      <section class="mobile-panel mobile-stability">
+        <div class="mobile-panel-head">
+          <div>
+            <h2>力度稳定度</h2>
+            <span id="mobileStabilitySummary">等待输入</span>
+          </div>
+          <strong id="mobileStabilityScore">--</strong>
+        </div>
+        <div class="mobile-score-bar"><span id="mobileStabilityBar"></span></div>
+      </section>
+      <section class="mobile-panel">
+        <div class="mobile-panel-head">
+          <div>
+            <h2>最近力度</h2>
+            <span id="mobileTrendSummary">最近 8 秒</span>
+          </div>
+        </div>
+        <div class="mobile-trend" id="mobileTrend"></div>
+      </section>
+      <section class="mobile-panel">
+        <div class="mobile-panel-head">
+          <div>
+            <h2>当前和弦</h2>
+            <span id="mobileChordSummary">等待输入</span>
+          </div>
+          <strong id="mobileChordScore">--</strong>
+        </div>
+        <div class="mobile-chord" id="mobileChord"></div>
+      </section>
+      <details class="mobile-details">
+        <summary>详细数据</summary>
+        <div class="mobile-detail-grid">
+          <span id="mobileDetailHistory">0 groups</span>
+          <span id="mobileDetailRaw">0 messages</span>
+        </div>
+      </details>
+    </section>
     <section class="grid">
       <section class="panel">
         <div class="heading"><h2>当前和弦</h2><div class="summary" id="chordSummary">等待输入</div></div>
