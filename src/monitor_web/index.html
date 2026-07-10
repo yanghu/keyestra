@@ -27,6 +27,23 @@
           <span id="mobileVelocity">0</span>
         </div>
       </section>
+      <section class="mobile-panel mobile-filter" aria-label="声部过滤">
+        <div class="mobile-panel-head">
+          <div>
+            <h2>声部</h2>
+            <span id="mobileFilterSummary">全部音区</span>
+          </div>
+          <select class="split-select" aria-label="分割音">
+            <option value="60">C4 分手</option>
+            <option value="72">C5 分手</option>
+          </select>
+        </div>
+        <div class="filter-buttons">
+          <button type="button" class="filter-button" data-hand-filter="all">全部</button>
+          <button type="button" class="filter-button" data-hand-filter="left">左手</button>
+          <button type="button" class="filter-button" data-hand-filter="right">右手</button>
+        </div>
+      </section>
       <section class="mobile-panel">
         <div class="mobile-panel-head">
           <div>
@@ -82,6 +99,15 @@
       <div class="heading">
         <div><h2>最近演奏</h2><div class="summary" id="timelineSummary">时间从左到右，最新在右侧</div></div>
         <div class="tools">
+          <div class="filter-tools" aria-label="声部过滤">
+            <button type="button" class="filter-button" data-hand-filter="all">全部</button>
+            <button type="button" class="filter-button" data-hand-filter="left">左手</button>
+            <button type="button" class="filter-button" data-hand-filter="right">右手</button>
+            <select class="split-select" aria-label="分割音">
+              <option value="60">C4 分手</option>
+              <option value="72">C5 分手</option>
+            </select>
+          </div>
           <select id="keySelect" aria-label="key">
             <option value="C">C</option><option value="G">G</option><option value="D">D</option><option value="A">A</option><option value="E">E</option><option value="F">F</option><option value="Bb">Bb</option><option value="Eb">Eb</option>
           </select>

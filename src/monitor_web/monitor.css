@@ -26,6 +26,9 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(28px,4vw,42px); line-height:1; } h2 {
 .timeline { margin-top:16px; }
 .timeline .heading { align-items:start; }
 .tools { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.filter-tools,.filter-buttons { display:flex; align-items:center; gap:5px; }
+.filter-button { height:30px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--muted); padding:0 8px; font:inherit; font-size:13px; font-weight:800; cursor:pointer; }
+.filter-button.active { border-color:var(--accent); background:var(--accent); color:#fff; }
 .ghost { height:30px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--accent); padding:0 9px; font:inherit; font-size:13px; font-weight:750; cursor:pointer; }
 select { height:30px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); padding:0 8px; font:inherit; font-size:13px; }
 .plot { position:relative; height:360px; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:linear-gradient(to top, rgba(24,32,29,.05) 1px, transparent 1px) 0 96px/100% 36px,#fbfcfa; }
@@ -84,6 +87,11 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .mobile-panel-head h2 { margin:0 0 2px; font-size:15px; }
   .mobile-panel-head strong { color:var(--accent); font-size:24px; line-height:1; }
   .mobile-clear { height:26px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--accent); padding:0 8px; font:inherit; font-size:12px; font-weight:800; }
+  .mobile-filter { padding-bottom:8px; }
+  .mobile-filter .mobile-panel-head { align-items:center; margin-bottom:7px; }
+  .mobile-filter .split-select { height:28px; max-width:116px; font-size:12px; font-weight:750; }
+  .filter-buttons { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .filter-button { height:30px; font-size:12px; }
   .mobile-score-bar { height:10px; overflow:hidden; border-radius:999px; background:var(--soft); }
   .mobile-score-bar span { display:block; width:0%; height:100%; border-radius:inherit; background:var(--accent); transition:width .16s ease; }
   .mobile-trend { position:relative; height:112px; display:flex; align-items:flex-end; gap:3px; padding:8px 8px 12px; border:1px solid var(--line); border-radius:8px; background:linear-gradient(to top, rgba(24,32,29,.05) 1px, transparent 1px) 0 22px/100% 22px,#fbfcfa; overflow:hidden; }

@@ -30,12 +30,53 @@ const workingRanges = [
   {min:108,max:127,label:"ff",className:"ff"},
 ];
 const $ = (id) => document.getElementById(id);
+const filterLabels = {all:"全部音区", left:"左手", right:"右手"};
 function loadSettings(){ try{ return JSON.parse(localStorage.getItem(storageKey) || "{}") || {}; } catch(e){ return {}; } }
 function saveSettings(settings){ try{ localStorage.setItem(storageKey, JSON.stringify(settings)); } catch(e){} }
 function updateSettings(patch){ saveSettings({...loadSettings(), ...patch}); }
 function restoreSettings(){
   const settings=loadSettings();
   if(settings.key && [...$("keySelect").options].some(option=>option.value===settings.key)) $("keySelect").value=settings.key;
+  applyFilterSettings(settings.handFilter || "all", Number(settings.splitNote || 60));
+}
+function currentFilterSettings(){
+  const settings=loadSettings();
+  const mode=["all","left","right"].includes(settings.handFilter) ? settings.handFilter : "all";
+  const split=Number(settings.splitNote || 60);
+  return {mode,split:Number.isFinite(split) ? split : 60};
+}
+function applyFilterSettings(mode, split){
+  document.querySelectorAll(".filter-button").forEach(button=>button.classList.toggle("active", button.dataset.handFilter===mode));
+  document.querySelectorAll(".split-select").forEach(select=>{ select.value=String(split); });
+  $("mobileFilterSummary").textContent = mode==="all" ? "全部音区" : `${filterLabels[mode]} · ${noteName(split)} ${mode==="right" ? "及以上" : "以下"}`;
+}
+function filterSummaryText(filter=currentFilterSettings()){
+  if(filter.mode==="all") return "全部音区";
+  return `${filterLabels[filter.mode]} ${noteName(filter.split)} ${filter.mode==="right" ? "及以上" : "以下"}`;
+}
+function noteName(note){
+  const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  return `${names[note%12]}${Math.floor(note/12)-1}`;
+}
+function notePassesFilter(note, filter=currentFilterSettings()){
+  if(filter.mode==="right") return note.note >= filter.split;
+  if(filter.mode==="left") return note.note < filter.split;
+  return true;
+}
+function recomputeGroup(group, notes){
+  if(!group || !notes.length) return null;
+  const velocities=notes.map(note=>note.velocity);
+  const min=Math.min(...velocities);
+  const max=Math.max(...velocities);
+  const average=Math.round(velocities.reduce((sum,value)=>sum+value,0)/velocities.length);
+  return {...group, notes, average, spread:max-min};
+}
+function filterGroup(group, filter=currentFilterSettings()){
+  if(!group) return null;
+  return recomputeGroup(group, group.notes.filter(note=>notePassesFilter(note, filter)));
+}
+function filterHistory(history, filter=currentFilterSettings()){
+  return history.map(group=>filterGroup(group, filter)).filter(Boolean);
 }
 function dynamicForVelocity(v){ return dynamicZones.find(zone=>v<=zone.max) || dynamicZones[dynamicZones.length-1]; }
 function cls(v){ return `velocity-${dynamicForVelocity(v).className}`; }
@@ -65,16 +106,19 @@ function spellingFor(note){
 function render(data){
   state.latestData = data;
   $("status").textContent = `${data.inputName} · ${data.messageCount} messages`;
-  const last = data.lastNote;
-  const history = visibleHistory(data.history || []);
+  const filter=currentFilterSettings();
+  applyFilterSettings(filter.mode, filter.split);
+  const history = visibleHistory(filterHistory(data.history || [], filter));
+  const currentChord = filterGroup(data.currentChord, filter);
+  const last = recentNotes(history, 1)[0] || null;
   const raw = (data.raw || []).filter(e=>Number(e.timeMs)>state.cutoffTimeMs);
   if(last && history.length){ $("lastName").textContent=noteLabel(last); $("lastVelocity").textContent=last.velocity; $("lastBar").style.width=`${last.velocity/127*100}%`; $("lastBar").className=`fill ${cls(last.velocity)}`; $("lastMark").textContent=last.mark; }
   else { $("lastName").textContent="-"; $("lastVelocity").textContent="0"; $("lastBar").style.width="0%"; $("lastMark").textContent="-"; }
-      renderChord(data.currentChord);
+      renderChord(currentChord);
       renderTimeline(history);
       renderHistory(history);
       renderRaw(raw, Math.max(0, data.messageCount - state.cutoffMessageCount));
-      renderMobile(data, history, raw);
+      renderMobile({...data,lastNote:last,currentChord}, history, raw);
     }
 function visibleHistory(history){ return history.filter(group=>Number(group.timeMs)>state.cutoffTimeMs); }
 function renderChord(group){
@@ -91,7 +135,7 @@ function renderTimeline(history){
   const timeline=$("timeline"); const groups=visibleGroups(history); timeline.innerHTML="";
   if(!groups.length){ timeline.innerHTML=`<div class="timeline-empty">等待输入</div>`; return; }
   const span=(groups[groups.length-1].timeMs-groups[0].timeMs)/1000;
-  $("timelineSummary").textContent = `${$("keySelect").value} 调 · ${groups.length} 组 · ${span.toFixed(1)}s · 上方音高，下方力度`;
+  $("timelineSummary").textContent = `${filterSummaryText()} · ${$("keySelect").value} 调 · ${groups.length} 组 · ${span.toFixed(1)}s · 上方音高，下方力度`;
   renderStaffPlot(timeline, groups);
 }
 function visibleGroups(history){
@@ -348,6 +392,17 @@ function renderHistory(history){
     }
     $("clearView").addEventListener("click",async()=>{ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); state.cutoffTimeMs=Date.now(); state.stabilityCutoffTimeMs=state.cutoffTimeMs; state.cutoffMessageCount=data.messageCount||0; render({...data,history:[],raw:[],lastNote:null,currentChord:null}); } catch(e){ state.cutoffTimeMs=Date.now(); state.stabilityCutoffTimeMs=state.cutoffTimeMs; } });
 $("mobileClearStability").addEventListener("click",()=>{ state.stabilityCutoffTimeMs=Date.now(); if(state.latestData) render(state.latestData); });
+document.querySelectorAll(".filter-button").forEach(button=>button.addEventListener("click",()=>{
+  const split=currentFilterSettings().split;
+  updateSettings({handFilter:button.dataset.handFilter, splitNote:split});
+  if(state.latestData) render(state.latestData); else applyFilterSettings(button.dataset.handFilter, split);
+}));
+document.querySelectorAll(".split-select").forEach(select=>select.addEventListener("change",()=>{
+  const mode=currentFilterSettings().mode;
+  const split=Number(select.value || 60);
+  updateSettings({handFilter:mode, splitNote:split});
+  if(state.latestData) render(state.latestData); else applyFilterSettings(mode, split);
+}));
 $("seedLog").addEventListener("click",async()=>{ const button=$("seedLog"); button.disabled=true; button.textContent="载入中"; try{ const result=await fetch("/seed-log",{cache:"no-store"}).then(r=>r.json()); button.textContent=result.loaded ? `已载入 ${result.loaded}` : "无日志"; } catch(e){ button.textContent="载入失败"; } setTimeout(()=>{ button.disabled=false; button.textContent="载入日志"; },1400); });
 restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
