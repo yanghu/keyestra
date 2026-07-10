@@ -545,16 +545,28 @@ fn note_name(note: u8) -> String {
 }
 
 fn dynamic_mark(value: u8) -> &'static str {
-    if value <= 20 {
+    if value == 0 {
+        "-"
+    } else if value <= 27 {
         "pp"
-    } else if value <= 40 {
+    } else if value <= 30 {
+        "pp/p"
+    } else if value <= 47 {
         "p"
-    } else if value <= 60 {
+    } else if value <= 50 {
+        "p/mp"
+    } else if value <= 67 {
         "mp"
-    } else if value <= 80 {
+    } else if value <= 70 {
+        "mp/mf"
+    } else if value <= 87 {
         "mf"
-    } else if value <= 100 {
+    } else if value <= 90 {
+        "mf/f"
+    } else if value <= 107 {
         "f"
+    } else if value <= 110 {
+        "f/ff"
     } else {
         "ff"
     }
@@ -620,3 +632,35 @@ fn escape_json(value: &str) -> String {
 const INDEX_HTML: &str = include_str!("../monitor_web/index.html");
 const MONITOR_CSS: &str = include_str!("../monitor_web/monitor.css");
 const MONITOR_JS: &str = include_str!("../monitor_web/monitor.js");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_mark_uses_overlapping_working_ranges() {
+        assert_eq!(dynamic_mark(0), "-");
+        assert_eq!(dynamic_mark(1), "pp");
+        assert_eq!(dynamic_mark(27), "pp");
+        assert_eq!(dynamic_mark(28), "pp/p");
+        assert_eq!(dynamic_mark(30), "pp/p");
+        assert_eq!(dynamic_mark(31), "p");
+        assert_eq!(dynamic_mark(47), "p");
+        assert_eq!(dynamic_mark(48), "p/mp");
+        assert_eq!(dynamic_mark(50), "p/mp");
+        assert_eq!(dynamic_mark(51), "mp");
+        assert_eq!(dynamic_mark(67), "mp");
+        assert_eq!(dynamic_mark(68), "mp/mf");
+        assert_eq!(dynamic_mark(70), "mp/mf");
+        assert_eq!(dynamic_mark(71), "mf");
+        assert_eq!(dynamic_mark(87), "mf");
+        assert_eq!(dynamic_mark(88), "mf/f");
+        assert_eq!(dynamic_mark(90), "mf/f");
+        assert_eq!(dynamic_mark(91), "f");
+        assert_eq!(dynamic_mark(107), "f");
+        assert_eq!(dynamic_mark(108), "f/ff");
+        assert_eq!(dynamic_mark(110), "f/ff");
+        assert_eq!(dynamic_mark(111), "ff");
+        assert_eq!(dynamic_mark(127), "ff");
+    }
+}

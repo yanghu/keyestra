@@ -1,0 +1,18 @@
+[input]
+name = "Roland Digital Piano"
+
+[output]
+name = "FP10 Mapped"
+
+[mapping]
+mode = "piecewise"
+points = [
+  [0, 0],
+  [1, 0],
+  [18, 28],
+  [32, 50],
+  [50, 74],
+  [70, 92],
+  [108, 127],
+  [127, 127],
+]

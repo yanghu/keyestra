@@ -82,6 +82,7 @@ Right-click the tray icon for:
 - Start mapper
 - Stop mapper
 - Restart mapper
+- Select the forum curve or mid-control curve
 - Install startup
 - Uninstall startup
 - Exit
@@ -140,7 +141,26 @@ points = [
 
 Each point is `[input_velocity, output_velocity]`. The tool builds a 128-value lookup table at startup using linear interpolation between points.
 
+The default `examples/curve.toml` is the FP-10 curve shared on the Pianoteq forum.
+`examples/curve-mid-control.toml` is a conservative variant that makes the middle range a little heavier so velocities around `50-80` have more finger-control room.
+The tray app can switch between these two curves and restarts the mapper automatically.
+
 Table mode requires exactly 128 values. Index is input velocity, value is output velocity. Velocity `0` is always kept as `0` to avoid stuck notes.
+
+## Monitor Dynamic Bands
+
+The monitor translates played MIDI velocities into practical dynamic working ranges. Each marking has a suggested center, and neighboring ranges overlap so boundary values can display as transitions such as `p/mp` instead of flickering between hard labels.
+
+| Dynamic | Center | Working range |
+| --- | ---: | ---: |
+| `pp` | 20 | 12-30 |
+| `p` | 40 | 28-50 |
+| `mp` | 60 | 48-70 |
+| `mf` | 80 | 68-90 |
+| `f` | 100 | 88-110 |
+| `ff` | 120 | 108-127 |
+
+Velocity `0` is treated as note-off-style passthrough and is not shown as a played dynamic.
 
 ## Reaper Notes
 

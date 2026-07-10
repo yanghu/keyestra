@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoop};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder};
 
 #[cfg(windows)]
@@ -78,6 +78,13 @@ enum RuntimeState {
     Waiting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurveChoice {
+    Forum,
+    MidControl,
+    Custom,
+}
+
 struct Supervisor {
     mapper: MapperProcess,
     monitor: MonitorProcess,
@@ -135,6 +142,10 @@ impl MapperProcess {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    fn set_curve(&mut self, curve: PathBuf) {
+        self.curve = curve;
     }
 
     fn is_running(&mut self) -> bool {
@@ -323,6 +334,11 @@ impl Supervisor {
         self.tick_mapper();
     }
 
+    fn select_curve(&mut self, curve: PathBuf) {
+        self.mapper.set_curve(curve);
+        self.restart_mapper();
+    }
+
     fn start_monitor(&mut self) {
         self.monitor_desired = DesiredState::Running;
         self.monitor_last_attempt = None;
@@ -371,10 +387,19 @@ impl Supervisor {
 
     fn tooltip_text(&self) -> String {
         format!(
-            "FP-10 tools - mapper: {}, monitor: {}",
+            "FP-10 tools - mapper: {}, monitor: {}, curve: {}",
             runtime_label(self.mapper_runtime),
-            runtime_label(self.monitor_runtime)
+            runtime_label(self.monitor_runtime),
+            self.curve_label()
         )
+    }
+
+    fn curve_choice(&self) -> CurveChoice {
+        curve_choice(&self.mapper.curve)
+    }
+
+    fn curve_label(&self) -> &'static str {
+        curve_label(self.curve_choice())
     }
 
     fn monitor_url(&self) -> String {
@@ -429,6 +454,11 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     let start_item = MenuItem::new("Start mapper", true, None);
     let stop_item = MenuItem::new("Stop mapper", true, None);
     let restart_item = MenuItem::new("Restart mapper", true, None);
+    let curve_status_item =
+        MenuItem::new(format!("Curve: {}", supervisor.curve_label()), false, None);
+    let forum_curve_item = CheckMenuItem::new("Forum curve", true, false, None);
+    let mid_control_curve_item = CheckMenuItem::new("Mid-control curve", true, false, None);
+    let custom_curve_item = CheckMenuItem::new("Custom curve", false, false, None);
     let start_monitor_item = MenuItem::new("Start monitor", true, None);
     let stop_monitor_item = MenuItem::new("Stop monitor", true, None);
     let restart_monitor_item = MenuItem::new("Restart monitor", true, None);
@@ -447,6 +477,11 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
         &start_item,
         &stop_item,
         &restart_item,
+        &PredefinedMenuItem::separator(),
+        &curve_status_item,
+        &forum_curve_item,
+        &mid_control_curve_item,
+        &custom_curve_item,
         &PredefinedMenuItem::separator(),
         &start_monitor_item,
         &stop_monitor_item,
@@ -467,6 +502,7 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     let menu_rx = MenuEvent::receiver();
     let mut last_mapper_status = String::new();
     let mut last_monitor_status = String::new();
+    let mut last_curve_choice = CurveChoice::Custom;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(1));
@@ -480,12 +516,21 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
             supervisor.tick();
             let mapper_status = supervisor.mapper_status_text();
             let monitor_status = supervisor.monitor_status_text();
-            if mapper_status != last_mapper_status || monitor_status != last_monitor_status {
+            let curve_choice = supervisor.curve_choice();
+            if mapper_status != last_mapper_status
+                || monitor_status != last_monitor_status
+                || curve_choice != last_curve_choice
+            {
                 mapper_status_item.set_text(&mapper_status);
                 monitor_status_item.set_text(&monitor_status);
+                curve_status_item.set_text(format!("Curve: {}", curve_label(curve_choice)));
+                forum_curve_item.set_checked(curve_choice == CurveChoice::Forum);
+                mid_control_curve_item.set_checked(curve_choice == CurveChoice::MidControl);
+                custom_curve_item.set_checked(curve_choice == CurveChoice::Custom);
                 let _ = tray_icon.set_tooltip(Some(supervisor.tooltip_text()));
                 last_mapper_status = mapper_status;
                 last_monitor_status = monitor_status;
+                last_curve_choice = curve_choice;
             }
         }
 
@@ -496,6 +541,10 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
                 supervisor.stop_mapper();
             } else if event.id == restart_item.id() {
                 supervisor.restart_mapper();
+            } else if event.id == forum_curve_item.id() {
+                supervisor.select_curve(default_curve_path());
+            } else if event.id == mid_control_curve_item.id() {
+                supervisor.select_curve(mid_control_curve_path());
             } else if event.id == start_monitor_item.id() {
                 supervisor.start_monitor();
             } else if event.id == stop_monitor_item.id() {
@@ -587,29 +636,57 @@ fn local_lan_ip() -> Option<String> {
 }
 
 fn default_curve_path() -> PathBuf {
+    curve_path("curve.toml")
+}
+
+fn mid_control_curve_path() -> PathBuf {
+    curve_path("curve-mid-control.toml")
+}
+
+fn curve_path(file_name: &str) -> PathBuf {
     let exe = env::current_exe().ok();
     let Some(exe) = exe else {
-        return PathBuf::from("examples/curve.toml");
+        return PathBuf::from("examples").join(file_name);
     };
     let Some(dir) = exe.parent() else {
-        return PathBuf::from("examples/curve.toml");
+        return PathBuf::from("examples").join(file_name);
     };
 
-    let beside_exe = dir.join("examples").join("curve.toml");
+    let beside_exe = dir.join("examples").join(file_name);
     if beside_exe.exists() {
         return beside_exe;
     }
 
-    let workspace_example = dir
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join("curve.toml");
+    let workspace_example = dir.join("..").join("..").join("examples").join(file_name);
     if workspace_example.exists() {
         return workspace_example;
     }
 
-    PathBuf::from("examples/curve.toml")
+    PathBuf::from("examples").join(file_name)
+}
+
+fn curve_choice(path: &Path) -> CurveChoice {
+    if same_path(path, &default_curve_path()) {
+        CurveChoice::Forum
+    } else if same_path(path, &mid_control_curve_path()) {
+        CurveChoice::MidControl
+    } else {
+        CurveChoice::Custom
+    }
+}
+
+fn curve_label(choice: CurveChoice) -> &'static str {
+    match choice {
+        CurveChoice::Forum => "Forum",
+        CurveChoice::MidControl => "Mid-control",
+        CurveChoice::Custom => "Custom",
+    }
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    left == right
 }
 
 fn app_data_dir() -> Result<PathBuf> {

@@ -1,6 +1,34 @@
-const state = { cutoffTimeMs: 0, cutoffMessageCount: 0, latestData: null };
+const state = { cutoffTimeMs: 0, cutoffMessageCount: 0, stabilityCutoffTimeMs: 0, latestData: null };
 const storageKey = "fp10-monitor-settings";
-const bands = [{value:20,label:"pp"},{value:40,label:"p"},{value:60,label:"mp"},{value:80,label:"mf"},{value:100,label:"f"},{value:127,label:"ff"}];
+const bands = [
+  {value:20,label:"pp"},
+  {value:40,label:"p"},
+  {value:60,label:"mp"},
+  {value:80,label:"mf"},
+  {value:100,label:"f"},
+  {value:120,label:"ff"},
+];
+const dynamicZones = [
+  {max:27,label:"pp",className:"pp"},
+  {max:30,label:"pp/p",className:"pp-p"},
+  {max:47,label:"p",className:"p"},
+  {max:50,label:"p/mp",className:"p-mp"},
+  {max:67,label:"mp",className:"mp"},
+  {max:70,label:"mp/mf",className:"mp-mf"},
+  {max:87,label:"mf",className:"mf"},
+  {max:90,label:"mf/f",className:"mf-f"},
+  {max:107,label:"f",className:"f"},
+  {max:110,label:"f/ff",className:"f-ff"},
+  {max:127,label:"ff",className:"ff"},
+];
+const workingRanges = [
+  {min:12,max:30,label:"pp",className:"pp"},
+  {min:28,max:50,label:"p",className:"p"},
+  {min:48,max:70,label:"mp",className:"mp"},
+  {min:68,max:90,label:"mf",className:"mf"},
+  {min:88,max:110,label:"f",className:"f"},
+  {min:108,max:127,label:"ff",className:"ff"},
+];
 const $ = (id) => document.getElementById(id);
 function loadSettings(){ try{ return JSON.parse(localStorage.getItem(storageKey) || "{}") || {}; } catch(e){ return {}; } }
 function saveSettings(settings){ try{ localStorage.setItem(storageKey, JSON.stringify(settings)); } catch(e){} }
@@ -9,9 +37,10 @@ function restoreSettings(){
   const settings=loadSettings();
   if(settings.key && [...$("keySelect").options].some(option=>option.value===settings.key)) $("keySelect").value=settings.key;
 }
-function cls(v){ if(v<=20)return"velocity-pp"; if(v<=40)return"velocity-p"; if(v<=60)return"velocity-mp"; if(v<=80)return"velocity-mf"; if(v<=100)return"velocity-f"; return"velocity-ff"; }
+function dynamicForVelocity(v){ return dynamicZones.find(zone=>v<=zone.max) || dynamicZones[dynamicZones.length-1]; }
+function cls(v){ return `velocity-${dynamicForVelocity(v).className}`; }
 function color(v){ return getComputedStyle(document.documentElement).getPropertyValue(`--${cls(v).replace("velocity-","")}`).trim(); }
-function markForVelocity(v){ if(v<=20)return"pp"; if(v<=40)return"p"; if(v<=60)return"mp"; if(v<=80)return"mf"; if(v<=100)return"f"; return"ff"; }
+function markForVelocity(v){ return v > 0 ? dynamicForVelocity(v).label : "-"; }
 function notePos(note){ const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]; const isBlack=(n)=>names[n%12].includes("#"); let count=0; for(let n=21;n<Math.max(21,Math.min(108,note));n++) if(!isBlack(n)) count++; const center=isBlack(note)?count:count+.5; return center/52*100; }
 function time(ms){ return new Date(Number(ms)).toLocaleTimeString("zh-CN",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit",fractionalSecondDigits:2}); }
 function spell(note){ return spellingFor(note).name; }
@@ -51,6 +80,7 @@ function visibleHistory(history){ return history.filter(group=>Number(group.time
 function renderChord(group){
   const keyboard=$("keyboard"); const cards=$("cards"); keyboard.innerHTML=""; cards.innerHTML="";
   const chordGraphHeight = 160;
+  renderDynamicZones(keyboard, chordGraphHeight);
   for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${band.value/127*chordGraphHeight}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
   if(!group){ $("chordSummary").textContent="等待输入"; return; }
   $("chordSummary").textContent=`${group.notes.length} 音 · 平均 ${group.average} · 差距 ${group.spread}`;
@@ -84,6 +114,15 @@ function timeScale(groups){
 }
 function xForTime(group,scale){ return scale.left + ((group.timeMs-scale.start)/scale.span) * (100-scale.left-scale.right); }
 function add(el, clsName, style, text){ const node=document.createElement("div"); node.className=clsName; Object.assign(node.style, style); if(text!==undefined) node.textContent=text; el.append(node); return node; }
+function renderDynamicZones(el, height, bottom=0){
+  for(const range of workingRanges){
+    const zone=add(el,`dynamic-zone velocity-${range.className}`,{
+      bottom:`${bottom + range.min/127*height}px`,
+      height:`${(range.max-range.min)/127*height}px`,
+    });
+    zone.title=`${range.label} ${range.min}-${range.max}`;
+  }
+}
 function drawRuler(el, scale){
   const seconds=Math.ceil(scale.span/1000); const step=seconds>12?2:1;
   for(let s=0;s<=seconds;s+=step){
@@ -125,7 +164,8 @@ function renderStaffPlot(el, groups){
 }
 function renderVelocityGrid(el){
   const laneBottom=38, laneHeight=82;
-  for(const value of [0,20,40,60,80,100,127]){
+  renderDynamicZones(el, laneHeight, laneBottom);
+  for(const value of [0,...bands.map(band=>band.value),127]){
     const bottom=laneBottom + value/127*laneHeight;
     add(el,"velocity-grid-line",{bottom:`${bottom}px`});
     add(el,"velocity-grid-label",{bottom:`${bottom}px`},String(value));
@@ -216,9 +256,10 @@ function renderHistory(history){
   $("history").innerHTML = history.map((group,index)=>`<tr class="group-row"><td colspan="4"><div class="group-meta"><strong>#${history.length-index}</strong><span>${time(group.timeMs)}</span><span>${group.notes.length} 音 · ${group.notes.map(noteLabel).join(" ")}</span><span>平均 ${group.average}</span><span>差距 ${group.spread}</span></div></td></tr>${group.notes.map(note=>`<tr><td></td><td><span class="pill">${noteLabel(note)}</span></td><td><div class="history-meter"><span class="${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></span><b>${note.velocity}</b></div></td><td>${note.mark}</td></tr>`).join("")}`).join("");
 }
     function renderRaw(raw,count){ $("rawSummary").textContent=`${count} messages`; $("raw").innerHTML=raw.map(e=>`<div class="raw-row"><span>${time(e.timeMs)}</span><strong>${e.kind}</strong><span>ch ${e.channel}</span><code>${e.bytes}</code></div>`).join(""); }
-    function recentNotes(history, limit=32){
+    function recentNotes(history, limit=32, afterMs=0){
       const notes=[];
       for(const group of history){
+        if(Number(group.timeMs)<=afterMs) continue;
         for(const note of group.notes) notes.push({...note,timeMs:group.timeMs});
         if(notes.length>=limit) break;
       }
@@ -235,22 +276,45 @@ function renderHistory(history){
       const sd=Math.sqrt(variance);
       return {count:velocities.length,average,min,max,spread:max-min,sd,score:Math.max(0,Math.min(100,Math.round(100-sd*3)))};
     }
-    function feedbackFor(stats,last){
+    function chordVelocityRange(group){
+      if(!group || !group.notes.length) return null;
+      const velocities=group.notes.map(note=>note.velocity);
+      return {min:Math.min(...velocities),max:Math.max(...velocities),spread:group.spread,average:group.average};
+    }
+    function feedbackFor(stats,group,last){
+      const range=chordVelocityRange(group);
+      if(range && group.notes.length>1 && range.spread>=18) return {title:"和弦不均",detail:`低 ${range.min} · 高 ${range.max} · 差距 ${range.spread}`};
+      if(range && group.notes.length>1 && range.spread<=8) return {title:"和弦均匀",detail:`平均 ${range.average} · 差距 ${range.spread}`};
       if(!last || !stats.count) return {title:"等待输入",detail:"弹几个音后开始分析"};
-      if(stats.count<4) return {title:`${last.mark} ${last.velocity}`,detail:"继续弹几下会出现稳定度"};
+      if(stats.count<4) return {title:"继续弹",detail:"再弹几下会出现稳定度"};
       if(stats.sd<=4) return {title:"很稳定",detail:`${markForVelocity(stats.average)} · 平均 ${stats.average} · 波动 ±${Math.round(stats.sd)}`};
       if(stats.sd<=8) return {title:"基本稳定",detail:`${markForVelocity(stats.average)} · 平均 ${stats.average} · 波动 ±${Math.round(stats.sd)}`};
       return {title:"力度起伏大",detail:`${markForVelocity(stats.average)} · 平均 ${stats.average} · 范围 ${stats.min}-${stats.max}`};
     }
+    function renderMobileHeroMeter(group,last){
+      const range=chordVelocityRange(group);
+      if(range && group.notes.length>1){
+        $("mobileDynamic").textContent=`${range.min}-${range.max}`;
+        $("mobileDynamic").style.color="";
+        $("mobileVelocity").textContent=`差距 ${range.spread}`;
+      } else if(last) {
+        $("mobileDynamic").textContent=String(last.velocity);
+        $("mobileDynamic").style.color=color(last.velocity);
+        $("mobileVelocity").textContent=last.mark;
+      } else {
+        $("mobileDynamic").textContent="-";
+        $("mobileDynamic").style.color="";
+        $("mobileVelocity").textContent="0";
+      }
+    }
     function renderMobile(data, history, raw){
       const last=data.lastNote;
-      const notes=recentNotes(history);
+      const notes=recentNotes(history, 32, state.stabilityCutoffTimeMs);
       const stats=velocityStats(notes);
-      const feedback=feedbackFor(stats,last);
+      const feedback=feedbackFor(stats,data.currentChord,last);
       $("mobileFeedback").textContent=feedback.title;
       $("mobileFeedbackDetail").textContent=feedback.detail;
-      $("mobileDynamic").textContent=last ? last.mark : "-";
-      $("mobileVelocity").textContent=last ? last.velocity : "0";
+      renderMobileHeroMeter(data.currentChord,last);
       $("mobileStabilityScore").textContent=stats.count ? `${stats.score}%` : "--";
       $("mobileStabilitySummary").textContent=stats.count ? `${stats.count} 个音 · 平均 ${stats.average} · 范围 ${stats.min}-${stats.max}` : "等待输入";
       $("mobileStabilityBar").style.width=`${stats.score}%`;
@@ -267,20 +331,23 @@ function renderHistory(history){
       const min=Math.min(...values);
       const max=Math.max(...values);
       $("mobileTrendSummary").textContent=`${groups.length} 组 · 平均 ${Math.round(values.reduce((sum,value)=>sum+value,0)/values.length)} · 范围 ${min}-${max}`;
-      el.innerHTML=groups.map(group=>`<span class="mobile-trend-bar ${cls(group.average)}" title="${time(group.timeMs)} · ${group.average}" style="height:${Math.max(8,Math.round(group.average/127*100))}%"></span>`).join("");
+      el.innerHTML="";
+      renderDynamicZones(el, 92, 12);
+      el.insertAdjacentHTML("beforeend", groups.map(group=>`<span class="mobile-trend-bar ${cls(group.average)}" title="${time(group.timeMs)} · ${group.average}" style="height:${Math.max(8,Math.round(group.average/127*100))}%"></span>`).join(""));
     }
     function renderMobileChord(group){
       const el=$("mobileChord");
       if(!group){ $("mobileChordSummary").textContent="等待输入"; $("mobileChordScore").textContent="--"; el.innerHTML=`<div class="mobile-empty">等待输入</div>`; return; }
       const score=Math.max(0,Math.min(100,100-Math.round(group.spread*2.2)));
-      $("mobileChordSummary").textContent=`整体 ${markForVelocity(group.average)} · 平均 ${group.average} · 差距 ${group.spread}`;
+      $("mobileChordSummary").textContent=`从低到高 · 平均 ${group.average} · 差距 ${group.spread}`;
       $("mobileChordScore").textContent=`${score}%`;
       el.innerHTML=group.notes.map(note=>{
         const name=noteLabel(note);
-        return `<div class="mobile-note"><strong>${name}</strong><em>${note.mark}</em><div class="mobile-note-track"><span class="${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></span></div><b>${note.velocity}</b></div>`;
+        return `<div class="mobile-note" title="${name} · ${note.mark} · ${note.velocity}"><div class="mobile-note-track"><span class="${cls(note.velocity)}" style="height:${Math.max(6,Math.round(note.velocity/127*100))}%"></span></div><strong>${name}</strong><em>${note.mark}</em><b>${note.velocity}</b></div>`;
       }).join("");
     }
-    $("clearView").addEventListener("click",async()=>{ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); state.cutoffTimeMs=Date.now(); state.cutoffMessageCount=data.messageCount||0; render({...data,history:[],raw:[],lastNote:null,currentChord:null}); } catch(e){ state.cutoffTimeMs=Date.now(); } });
+    $("clearView").addEventListener("click",async()=>{ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); state.cutoffTimeMs=Date.now(); state.stabilityCutoffTimeMs=state.cutoffTimeMs; state.cutoffMessageCount=data.messageCount||0; render({...data,history:[],raw:[],lastNote:null,currentChord:null}); } catch(e){ state.cutoffTimeMs=Date.now(); state.stabilityCutoffTimeMs=state.cutoffTimeMs; } });
+$("mobileClearStability").addEventListener("click",()=>{ state.stabilityCutoffTimeMs=Date.now(); if(state.latestData) render(state.latestData); });
 $("seedLog").addEventListener("click",async()=>{ const button=$("seedLog"); button.disabled=true; button.textContent="载入中"; try{ const result=await fetch("/seed-log",{cache:"no-store"}).then(r=>r.json()); button.textContent=result.loaded ? `已载入 ${result.loaded}` : "无日志"; } catch(e){ button.textContent="载入失败"; } setTimeout(()=>{ button.disabled=false; button.textContent="载入日志"; },1400); });
 restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });

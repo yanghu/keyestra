@@ -23,6 +23,14 @@ Hardware behavior cannot be fully validated without MIDI devices and a virtual
 MIDI port. If no MIDI hardware is available, verify compile/tests and clearly
 say that live MIDI behavior was not manually tested.
 
+## Build/Deploy Notes
+
+When the user asks to build, release, or deploy locally, expect Windows to lock
+release binaries if the app is already running from `target\release`. It is OK
+to stop the running `fp10-map`, `fp10-map-tray`, and `fp10-monitor-server`
+processes first, rebuild the three release binaries, then restart
+`target\release\fp10-map-tray.exe`.
+
 ## MIDI Invariants
 
 - Preserve MIDI messages other than Note On velocity mapping. Note Off, sustain
