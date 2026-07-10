@@ -354,7 +354,11 @@ impl Supervisor {
     }
 
     fn mapper_status_text(&self) -> String {
-        status_text("Mapper", self.mapper_runtime, self.mapper_last_error.as_deref())
+        status_text(
+            "Mapper",
+            self.mapper_runtime,
+            self.mapper_last_error.as_deref(),
+        )
     }
 
     fn monitor_status_text(&self) -> String {
@@ -469,7 +473,8 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
 
         if matches!(
             event,
-            Event::NewEvents(StartCause::Init) | Event::NewEvents(StartCause::ResumeTimeReached { .. })
+            Event::NewEvents(StartCause::Init)
+                | Event::NewEvents(StartCause::ResumeTimeReached { .. })
         ) {
             let _keep_alive = &tray_icon;
             supervisor.tick();
@@ -595,7 +600,11 @@ fn default_curve_path() -> PathBuf {
         return beside_exe;
     }
 
-    let workspace_example = dir.join("..").join("..").join("examples").join("curve.toml");
+    let workspace_example = dir
+        .join("..")
+        .join("..")
+        .join("examples")
+        .join("curve.toml");
     if workspace_example.exists() {
         return workspace_example;
     }

@@ -10,7 +10,12 @@ pub struct VelocityMapper {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MappingReport {
-    Mapped { channel: u8, note: u8, input: u8, output: u8 },
+    Mapped {
+        channel: u8,
+        note: u8,
+        input: u8,
+        output: u8,
+    },
     Passthrough,
 }
 
@@ -103,7 +108,8 @@ fn curve_table(gamma: f32, min_out: u8, max_out: u8) -> Result<[u8; 128]> {
 }
 
 fn table_from_config(values: Option<&[u8]>) -> Result<[u8; 128]> {
-    let values = values.ok_or_else(|| anyhow::anyhow!("mapping.velocity_table is required for table mode"))?;
+    let values = values
+        .ok_or_else(|| anyhow::anyhow!("mapping.velocity_table is required for table mode"))?;
     if values.len() != 128 {
         bail!("mapping.velocity_table must contain exactly 128 values");
     }
@@ -118,7 +124,8 @@ fn table_from_config(values: Option<&[u8]>) -> Result<[u8; 128]> {
 }
 
 fn piecewise_table(points: Option<&[[u8; 2]]>) -> Result<[u8; 128]> {
-    let points = points.ok_or_else(|| anyhow::anyhow!("mapping.points is required for piecewise mode"))?;
+    let points =
+        points.ok_or_else(|| anyhow::anyhow!("mapping.points is required for piecewise mode"))?;
     if points.len() < 2 {
         bail!("mapping.points must contain at least two points");
     }
@@ -198,7 +205,16 @@ mod tests {
 
     #[test]
     fn piecewise_mapping_interpolates_between_points() {
-        let table = piecewise_table(Some(&[[0, 0], [1, 0], [18, 30], [32, 57], [50, 84], [108, 127], [127, 127]])).unwrap();
+        let table = piecewise_table(Some(&[
+            [0, 0],
+            [1, 0],
+            [18, 30],
+            [32, 57],
+            [50, 84],
+            [108, 127],
+            [127, 127],
+        ]))
+        .unwrap();
         assert_eq!(table[0], 0);
         assert_eq!(table[1], 0);
         assert_eq!(table[18], 30);

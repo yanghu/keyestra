@@ -140,7 +140,10 @@ fn port_error(
     midi_in: &MidiInput,
     ports: &[MidiInputPort],
 ) -> anyhow::Error {
-    let mut lines = vec![format!("Could not find MIDI {} port {:?}. Available:", kind, selector)];
+    let mut lines = vec![format!(
+        "Could not find MIDI {} port {:?}. Available:",
+        kind, selector
+    )];
     for (index, port) in ports.iter().enumerate() {
         let name = midi_in
             .port_name(port)
@@ -156,7 +159,10 @@ fn output_port_error(
     midi_out: &MidiOutput,
     ports: &[MidiOutputPort],
 ) -> anyhow::Error {
-    let mut lines = vec![format!("Could not find MIDI {} port {:?}. Available:", kind, selector)];
+    let mut lines = vec![format!(
+        "Could not find MIDI {} port {:?}. Available:",
+        kind, selector
+    )];
     for (index, port) in ports.iter().enumerate() {
         let name = midi_out
             .port_name(port)

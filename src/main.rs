@@ -60,9 +60,12 @@ fn main() -> Result<()> {
         .map(PortSelector::parse)
         .or_else(|| config.as_ref().and_then(|c| c.output_selector()));
 
-    let input = input.ok_or_else(|| anyhow::anyhow!("Missing input. Use --in or configure [input].name/index."))?;
-    let output =
-        output.ok_or_else(|| anyhow::anyhow!("Missing output. Use --out or configure [output].name/index."))?;
+    let input = input.ok_or_else(|| {
+        anyhow::anyhow!("Missing input. Use --in or configure [input].name/index.")
+    })?;
+    let output = output.ok_or_else(|| {
+        anyhow::anyhow!("Missing output. Use --out or configure [output].name/index.")
+    })?;
 
     let mapper = if cli.bypass {
         VelocityMapper::bypass()

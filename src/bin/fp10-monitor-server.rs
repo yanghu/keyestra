@@ -21,7 +21,11 @@ struct Cli {
     #[arg(long, help = "List MIDI input ports")]
     list: bool,
 
-    #[arg(long = "in", default_value = "FP10 Mapped", help = "MIDI input port name substring or index")]
+    #[arg(
+        long = "in",
+        default_value = "FP10 Mapped",
+        help = "MIDI input port name substring or index"
+    )]
     input: String,
 
     #[arg(long, default_value_t = 8770, help = "Local HTTP port")]
@@ -131,7 +135,11 @@ impl MonitorState {
             return;
         }
 
-        let mut notes: Vec<NoteEvent> = self.chord_buffer.drain(..).map(|(_, event)| event).collect();
+        let mut notes: Vec<NoteEvent> = self
+            .chord_buffer
+            .drain(..)
+            .map(|(_, event)| event)
+            .collect();
         notes.sort_by_key(|event| event.note);
 
         let min = notes.iter().map(|event| event.velocity).min().unwrap_or(0);
@@ -227,7 +235,8 @@ fn main() -> Result<()> {
         .with_context(|| format!("Failed to open MIDI input {}", input_name))?;
 
     let address = format!("{}:{}", cli.host, cli.port);
-    let listener = TcpListener::bind(&address).with_context(|| format!("Failed to bind {}", address))?;
+    let listener =
+        TcpListener::bind(&address).with_context(|| format!("Failed to bind {}", address))?;
     println!("Monitoring MIDI input: {}", input_name);
     println!("Dashboard: http://localhost:{}/", cli.port);
     if cli.host == "0.0.0.0" {
@@ -290,8 +299,15 @@ fn select_input_port(midi_in: &MidiInput, selector: &PortSelector) -> Result<Mid
     }
 }
 
-fn input_port_error(selector: &PortSelector, midi_in: &MidiInput, ports: &[MidiInputPort]) -> anyhow::Error {
-    let mut lines = vec![format!("Could not find MIDI input port {:?}. Available:", selector)];
+fn input_port_error(
+    selector: &PortSelector,
+    midi_in: &MidiInput,
+    ports: &[MidiInputPort],
+) -> anyhow::Error {
+    let mut lines = vec![format!(
+        "Could not find MIDI input port {:?}. Available:",
+        selector
+    )];
     for (index, port) in ports.iter().enumerate() {
         let name = midi_in
             .port_name(port)
@@ -316,8 +332,18 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
         .unwrap_or("/");
 
     match path {
-        "/" | "/index.html" => respond(&mut stream, "200 OK", "text/html; charset=utf-8", INDEX_HTML),
-        "/assets/monitor.css" => respond(&mut stream, "200 OK", "text/css; charset=utf-8", MONITOR_CSS),
+        "/" | "/index.html" => respond(
+            &mut stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            INDEX_HTML,
+        ),
+        "/assets/monitor.css" => respond(
+            &mut stream,
+            "200 OK",
+            "text/css; charset=utf-8",
+            MONITOR_CSS,
+        ),
         "/assets/monitor.js" => respond(
             &mut stream,
             "200 OK",
@@ -332,7 +358,12 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
                     state.to_json()
                 })
                 .unwrap_or_else(|_| "{\"error\":\"state lock poisoned\"}".to_string());
-            respond(&mut stream, "200 OK", "application/json; charset=utf-8", &json)
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &json,
+            )
         }
         "/events" => respond_events(stream, state),
         "/seed-log" => {
@@ -340,9 +371,19 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
                 Ok(count) => format!("{{\"loaded\":{}}}", count),
                 Err(error) => format!("{{\"error\":\"{}\"}}", escape_json(&error.to_string())),
             };
-            respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body)
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+            )
         }
-        _ => respond(&mut stream, "404 Not Found", "text/plain; charset=utf-8", "Not found"),
+        _ => respond(
+            &mut stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            "Not found",
+        ),
     }
 }
 
@@ -385,9 +426,17 @@ fn respond_events(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Res
 
 fn seed_from_tray_log(state: &Arc<Mutex<MonitorState>>) -> Result<usize> {
     let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
-    let log_path = std::path::PathBuf::from(appdata).join("fp10-map").join("tray.log");
-    let text = fs::read_to_string(&log_path).with_context(|| format!("Failed to read {}", log_path.display()))?;
-    let events: Vec<(u8, u8)> = text.lines().filter_map(parse_mapped_note).rev().take(36).collect();
+    let log_path = std::path::PathBuf::from(appdata)
+        .join("fp10-map")
+        .join("tray.log");
+    let text = fs::read_to_string(&log_path)
+        .with_context(|| format!("Failed to read {}", log_path.display()))?;
+    let events: Vec<(u8, u8)> = text
+        .lines()
+        .filter_map(parse_mapped_note)
+        .rev()
+        .take(36)
+        .collect();
     let mut state = state
         .lock()
         .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
@@ -488,7 +537,9 @@ fn midi_message_name(status: u8) -> &'static str {
 }
 
 fn note_name(note: u8) -> String {
-    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
     let octave = (note / 12) as i16 - 1;
     format!("{}{}", NAMES[(note % 12) as usize], octave)
 }
@@ -569,4 +620,3 @@ fn escape_json(value: &str) -> String {
 const INDEX_HTML: &str = include_str!("../monitor_web/index.html");
 const MONITOR_CSS: &str = include_str!("../monitor_web/monitor.css");
 const MONITOR_JS: &str = include_str!("../monitor_web/monitor.js");
-

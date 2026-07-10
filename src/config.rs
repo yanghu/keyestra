@@ -53,7 +53,8 @@ impl AppConfig {
     pub fn from_path(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file {}", path.display()))?;
-        toml::from_str(&text).with_context(|| format!("Failed to parse config file {}", path.display()))
+        toml::from_str(&text)
+            .with_context(|| format!("Failed to parse config file {}", path.display()))
     }
 
     pub fn input_selector(&self) -> Option<PortSelector> {
