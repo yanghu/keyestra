@@ -29,6 +29,12 @@ struct Cli {
     #[arg(long = "out", default_value = "FP10 Mapped")]
     output: String,
 
+    #[arg(long = "monitor-in", default_value = "FP10 Mapped")]
+    monitor_input: String,
+
+    #[arg(long = "monitor-port", default_value_t = 8770)]
+    monitor_port: u16,
+
     #[arg(long)]
     curve: Option<PathBuf>,
 
@@ -47,6 +53,13 @@ struct MapperProcess {
     log_path: PathBuf,
 }
 
+struct MonitorProcess {
+    child: Option<Child>,
+    input: String,
+    port: u16,
+    log_path: PathBuf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesiredState {
     Running,
@@ -62,10 +75,15 @@ enum RuntimeState {
 
 struct Supervisor {
     mapper: MapperProcess,
-    desired: DesiredState,
-    runtime: RuntimeState,
-    last_attempt: Option<Instant>,
-    last_error: Option<String>,
+    monitor: MonitorProcess,
+    mapper_desired: DesiredState,
+    monitor_desired: DesiredState,
+    mapper_runtime: RuntimeState,
+    monitor_runtime: RuntimeState,
+    mapper_last_attempt: Option<Instant>,
+    monitor_last_attempt: Option<Instant>,
+    mapper_last_error: Option<String>,
+    monitor_last_error: Option<String>,
 }
 
 impl MapperProcess {
@@ -128,84 +146,227 @@ impl MapperProcess {
     }
 }
 
+impl MonitorProcess {
+    fn new(input: String, port: u16, log_path: PathBuf) -> Self {
+        Self {
+            child: None,
+            input,
+            port,
+            log_path,
+        }
+    }
+
+    fn start(&mut self) -> Result<()> {
+        if self.is_running() {
+            return Ok(());
+        }
+
+        let monitor_exe = monitor_exe_path()?;
+        let stdout = append_log_file(&self.log_path)?;
+        let stderr = stdout.try_clone()?;
+
+        let mut command = Command::new(monitor_exe);
+        command
+            .arg("--in")
+            .arg(&self.input)
+            .arg("--port")
+            .arg(self.port.to_string())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NO_WINDOW);
+
+        self.child = Some(
+            command
+                .spawn()
+                .context("Failed to start fp10-monitor-server.exe")?,
+        );
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn is_running(&mut self) -> bool {
+        match self.child.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(Some(_)) | Err(_) => {
+                    self.child = None;
+                    false
+                }
+                Ok(None) => true,
+            },
+            None => false,
+        }
+    }
+}
+
 impl Supervisor {
-    fn new(mapper: MapperProcess) -> Self {
+    fn new(mapper: MapperProcess, monitor: MonitorProcess) -> Self {
         Self {
             mapper,
-            desired: DesiredState::Running,
-            runtime: RuntimeState::Stopped,
-            last_attempt: None,
-            last_error: None,
+            monitor,
+            mapper_desired: DesiredState::Running,
+            monitor_desired: DesiredState::Running,
+            mapper_runtime: RuntimeState::Stopped,
+            monitor_runtime: RuntimeState::Stopped,
+            mapper_last_attempt: None,
+            monitor_last_attempt: None,
+            mapper_last_error: None,
+            monitor_last_error: None,
         }
     }
 
     fn tick(&mut self) {
+        self.tick_mapper();
+        self.tick_monitor();
+    }
+
+    fn tick_mapper(&mut self) {
         if self.mapper.is_running() {
-            self.runtime = RuntimeState::Running;
-            self.last_error = None;
+            self.mapper_runtime = RuntimeState::Running;
+            self.mapper_last_error = None;
             return;
         }
 
-        if self.desired == DesiredState::Stopped {
-            self.runtime = RuntimeState::Stopped;
+        if self.mapper_desired == DesiredState::Stopped {
+            self.mapper_runtime = RuntimeState::Stopped;
             return;
         }
 
-        self.runtime = RuntimeState::Waiting;
+        self.mapper_runtime = RuntimeState::Waiting;
         let should_try = self
-            .last_attempt
+            .mapper_last_attempt
             .map(|last| last.elapsed() >= Duration::from_secs(5))
             .unwrap_or(true);
 
         if should_try {
-            self.last_attempt = Some(Instant::now());
+            self.mapper_last_attempt = Some(Instant::now());
             match self.mapper.start() {
                 Ok(()) => {
                     if self.mapper.is_running() {
-                        self.runtime = RuntimeState::Running;
-                        self.last_error = None;
+                        self.mapper_runtime = RuntimeState::Running;
+                        self.mapper_last_error = None;
                     }
                 }
                 Err(error) => {
-                    self.last_error = Some(error.to_string());
+                    self.mapper_last_error = Some(error.to_string());
                 }
             }
         }
     }
 
-    fn start(&mut self) {
-        self.desired = DesiredState::Running;
-        self.last_attempt = None;
-        self.tick();
-    }
+    fn tick_monitor(&mut self) {
+        if self.monitor.is_running() {
+            self.monitor_runtime = RuntimeState::Running;
+            self.monitor_last_error = None;
+            return;
+        }
 
-    fn stop(&mut self) {
-        self.desired = DesiredState::Stopped;
-        self.mapper.stop();
-        self.runtime = RuntimeState::Stopped;
-        self.last_error = None;
-    }
+        if self.monitor_desired == DesiredState::Stopped {
+            self.monitor_runtime = RuntimeState::Stopped;
+            return;
+        }
 
-    fn restart(&mut self) {
-        self.desired = DesiredState::Running;
-        self.mapper.stop();
-        self.last_attempt = None;
-        self.tick();
-    }
+        self.monitor_runtime = RuntimeState::Waiting;
+        let should_try = self
+            .monitor_last_attempt
+            .map(|last| last.elapsed() >= Duration::from_secs(5))
+            .unwrap_or(true);
 
-    fn status_text(&self) -> String {
-        match self.runtime {
-            RuntimeState::Running => "Status: Running".to_string(),
-            RuntimeState::Stopped => "Status: Stopped".to_string(),
-            RuntimeState::Waiting => match &self.last_error {
-                Some(error) => format!("Status: Waiting - {}", first_line(error)),
-                None => "Status: Waiting for MIDI ports".to_string(),
-            },
+        if should_try {
+            self.monitor_last_attempt = Some(Instant::now());
+            match self.monitor.start() {
+                Ok(()) => {
+                    if self.monitor.is_running() {
+                        self.monitor_runtime = RuntimeState::Running;
+                        self.monitor_last_error = None;
+                    }
+                }
+                Err(error) => {
+                    self.monitor_last_error = Some(error.to_string());
+                }
+            }
         }
     }
 
+    fn start_mapper(&mut self) {
+        self.mapper_desired = DesiredState::Running;
+        self.mapper_last_attempt = None;
+        self.tick_mapper();
+    }
+
+    fn stop_mapper(&mut self) {
+        self.mapper_desired = DesiredState::Stopped;
+        self.mapper.stop();
+        self.mapper_runtime = RuntimeState::Stopped;
+        self.mapper_last_error = None;
+    }
+
+    fn restart_mapper(&mut self) {
+        self.mapper_desired = DesiredState::Running;
+        self.mapper.stop();
+        self.mapper_last_attempt = None;
+        self.tick_mapper();
+    }
+
+    fn start_monitor(&mut self) {
+        self.monitor_desired = DesiredState::Running;
+        self.monitor_last_attempt = None;
+        self.tick_monitor();
+    }
+
+    fn stop_monitor(&mut self) {
+        self.monitor_desired = DesiredState::Stopped;
+        self.monitor.stop();
+        self.monitor_runtime = RuntimeState::Stopped;
+        self.monitor_last_error = None;
+    }
+
+    fn restart_monitor(&mut self) {
+        self.monitor_desired = DesiredState::Running;
+        self.monitor.stop();
+        self.monitor_last_attempt = None;
+        self.tick_monitor();
+    }
+
+    fn restart_all(&mut self) {
+        self.restart_mapper();
+        self.restart_monitor();
+    }
+
+    fn stop_all(&mut self) {
+        self.stop_mapper();
+        self.stop_monitor();
+    }
+
+    fn mapper_status_text(&self) -> String {
+        status_text("Mapper", self.mapper_runtime, self.mapper_last_error.as_deref())
+    }
+
+    fn monitor_status_text(&self) -> String {
+        status_text(
+            "Monitor",
+            self.monitor_runtime,
+            self.monitor_last_error.as_deref(),
+        )
+    }
+
     fn tooltip_text(&self) -> String {
-        format!("FP-10 mapper - {}", self.status_text().trim_start_matches("Status: "))
+        format!(
+            "FP-10 tools - mapper: {}, monitor: {}",
+            runtime_label(self.mapper_runtime),
+            runtime_label(self.monitor_runtime)
+        )
+    }
+
+    fn monitor_url(&self) -> String {
+        format!("http://localhost:{}/", self.monitor.port)
     }
 }
 
@@ -222,31 +383,48 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let log_path = app_data_dir()?.join("tray.log");
+    let app_data = app_data_dir()?;
+    let mapper_log_path = app_data.join("tray.log");
+    let monitor_log_path = app_data.join("monitor.log");
     let curve = cli.curve.unwrap_or_else(default_curve_path);
-    let mapper = MapperProcess::new(cli.input, cli.output, curve, log_path);
+    let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log_path);
+    let monitor = MonitorProcess::new(cli.monitor_input, cli.monitor_port, monitor_log_path);
 
-    run_tray(Supervisor::new(mapper))
+    run_tray(Supervisor::new(mapper, monitor))
 }
 
 fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     let event_loop = EventLoop::new();
     let tray_menu = Menu::new();
 
-    let status_item = MenuItem::new("Status: Starting", false, None);
+    let mapper_status_item = MenuItem::new("Mapper: Starting", false, None);
+    let monitor_status_item = MenuItem::new("Monitor: Starting", false, None);
+    let open_monitor_item = MenuItem::new("Open monitor page", true, None);
+    let restart_all_item = MenuItem::new("Restart all", true, None);
     let start_item = MenuItem::new("Start mapper", true, None);
     let stop_item = MenuItem::new("Stop mapper", true, None);
     let restart_item = MenuItem::new("Restart mapper", true, None);
+    let start_monitor_item = MenuItem::new("Start monitor", true, None);
+    let stop_monitor_item = MenuItem::new("Stop monitor", true, None);
+    let restart_monitor_item = MenuItem::new("Restart monitor", true, None);
     let install_item = MenuItem::new("Install startup", true, None);
     let uninstall_item = MenuItem::new("Uninstall startup", true, None);
     let quit_item = MenuItem::new("Exit", true, None);
 
     tray_menu.append_items(&[
-        &status_item,
+        &mapper_status_item,
+        &monitor_status_item,
+        &PredefinedMenuItem::separator(),
+        &open_monitor_item,
+        &restart_all_item,
         &PredefinedMenuItem::separator(),
         &start_item,
         &stop_item,
         &restart_item,
+        &PredefinedMenuItem::separator(),
+        &start_monitor_item,
+        &stop_monitor_item,
+        &restart_monitor_item,
         &PredefinedMenuItem::separator(),
         &install_item,
         &uninstall_item,
@@ -261,7 +439,8 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
         .build()?;
 
     let menu_rx = MenuEvent::receiver();
-    let mut last_status = String::new();
+    let mut last_mapper_status = String::new();
+    let mut last_monitor_status = String::new();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(1));
@@ -272,31 +451,63 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
         ) {
             let _keep_alive = &tray_icon;
             supervisor.tick();
-            let status = supervisor.status_text();
-            if status != last_status {
-                status_item.set_text(&status);
+            let mapper_status = supervisor.mapper_status_text();
+            let monitor_status = supervisor.monitor_status_text();
+            if mapper_status != last_mapper_status || monitor_status != last_monitor_status {
+                mapper_status_item.set_text(&mapper_status);
+                monitor_status_item.set_text(&monitor_status);
                 let _ = tray_icon.set_tooltip(Some(supervisor.tooltip_text()));
-                last_status = status;
+                last_mapper_status = mapper_status;
+                last_monitor_status = monitor_status;
             }
         }
 
         while let Ok(event) = menu_rx.try_recv() {
             if event.id == start_item.id() {
-                supervisor.start();
+                supervisor.start_mapper();
             } else if event.id == stop_item.id() {
-                supervisor.stop();
+                supervisor.stop_mapper();
             } else if event.id == restart_item.id() {
-                supervisor.restart();
+                supervisor.restart_mapper();
+            } else if event.id == start_monitor_item.id() {
+                supervisor.start_monitor();
+            } else if event.id == stop_monitor_item.id() {
+                supervisor.stop_monitor();
+            } else if event.id == restart_monitor_item.id() {
+                supervisor.restart_monitor();
+            } else if event.id == restart_all_item.id() {
+                supervisor.restart_all();
+            } else if event.id == open_monitor_item.id() {
+                let _ = open_url(&supervisor.monitor_url());
             } else if event.id == install_item.id() {
                 let _ = install_startup();
             } else if event.id == uninstall_item.id() {
                 let _ = uninstall_startup();
             } else if event.id == quit_item.id() {
-                supervisor.stop();
+                supervisor.stop_all();
                 *control_flow = ControlFlow::Exit;
             }
         }
     });
+}
+
+fn status_text(name: &str, runtime: RuntimeState, last_error: Option<&str>) -> String {
+    match runtime {
+        RuntimeState::Running => format!("{}: Running", name),
+        RuntimeState::Stopped => format!("{}: Stopped", name),
+        RuntimeState::Waiting => match last_error {
+            Some(error) => format!("{}: Waiting - {}", name, first_line(error)),
+            None => format!("{}: Waiting for MIDI ports", name),
+        },
+    }
+}
+
+fn runtime_label(runtime: RuntimeState) -> &'static str {
+    match runtime {
+        RuntimeState::Running => "running",
+        RuntimeState::Stopped => "stopped",
+        RuntimeState::Waiting => "waiting",
+    }
 }
 
 fn first_line(text: &str) -> &str {
@@ -309,6 +520,37 @@ fn mapper_exe_path() -> Result<PathBuf> {
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Could not find tray exe directory"))?;
     Ok(dir.join("fp10-map.exe"))
+}
+
+fn monitor_exe_path() -> Result<PathBuf> {
+    let exe = env::current_exe()?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Could not find tray exe directory"))?;
+    Ok(dir.join("fp10-monitor-server.exe"))
+}
+
+fn open_url(url: &str) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command.spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(url).spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(url).spawn()?;
+        return Ok(());
+    }
 }
 
 fn default_curve_path() -> PathBuf {

@@ -530,7 +530,7 @@ const INDEX_HTML: &str = r###"<!doctype html>
     .guide { position:absolute; left:0; right:0; height:1px; border-top:1px dashed rgba(24,32,29,.22); z-index:1; }
     .guide span,.guide b { position:absolute; top:-10px; padding:1px 5px; border-radius:5px; background:rgba(255,255,255,.88); color:var(--muted); font-size:11px; }
     .guide span { left:7px; font-weight:750; } .guide b { right:7px; font-weight:650; }
-    .key { position:absolute; bottom:0; width:18px; min-height:28px; transform:translateX(-50%); border-radius:7px 7px 0 0; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:750; z-index:2; }
+    .key { position:absolute; bottom:0; width:18px; min-height:2px; transform:translateX(-50%); border-radius:7px 7px 0 0; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:750; z-index:2; }
     .key .value { writing-mode:vertical-rl; max-height:130px; overflow:hidden; }
     .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:10px; margin-top:12px; }
     .card { border:1px solid var(--line); border-radius:8px; padding:10px; background:#fbfcfa; } .card strong { display:block; font-size:18px; margin-bottom:8px; }
@@ -612,10 +612,11 @@ const INDEX_HTML: &str = r###"<!doctype html>
     }
     function renderChord(group){
       const keyboard=$("keyboard"); const cards=$("cards"); keyboard.innerHTML=""; cards.innerHTML="";
-      for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${28+band.value/127*132}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
+      const chordGraphHeight = 160;
+      for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${band.value/127*chordGraphHeight}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
       if(!group){ $("chordSummary").textContent="等待输入"; return; }
       $("chordSummary").textContent=`${group.notes.length} 音 · 平均 ${group.average} · 差距 ${group.spread}`;
-      for(const note of group.notes){ const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${28+note.velocity/127*132}px`; marker.innerHTML=`<span class="value">${note.name} ${note.velocity}</span>`; keyboard.append(marker);
+      for(const note of group.notes){ const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${Math.max(2,note.velocity/127*chordGraphHeight)}px`; marker.innerHTML=`<span class="value">${note.name} ${note.velocity}</span>`; keyboard.append(marker);
         const card=document.createElement("article"); card.className="card"; card.innerHTML=`<strong>${note.name}</strong><div class="mini"><span>力度</span><div class="track"><div class="fill ${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></div></div><b>${note.velocity}</b></div>`; cards.append(card); }
     }
     function renderTimeline(history){
@@ -656,7 +657,7 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     .guide { position:absolute; left:0; right:0; height:1px; border-top:1px dashed rgba(24,32,29,.22); z-index:1; }
     .guide span,.guide b { position:absolute; top:-10px; padding:1px 5px; border-radius:5px; background:rgba(255,255,255,.88); color:var(--muted); font-size:11px; }
     .guide span { left:7px; font-weight:750; } .guide b { right:7px; font-weight:650; }
-    .key { position:absolute; bottom:0; width:18px; min-height:28px; transform:translateX(-50%); border-radius:7px 7px 0 0; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:750; z-index:2; }
+    .key { position:absolute; bottom:0; width:18px; min-height:2px; transform:translateX(-50%); border-radius:7px 7px 0 0; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:750; z-index:2; }
     .key .value { writing-mode:vertical-rl; max-height:130px; overflow:hidden; }
     .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:10px; margin-top:12px; }
     .card { border:1px solid var(--line); border-radius:8px; padding:10px; background:#fbfcfa; } .card strong { display:block; font-size:18px; margin-bottom:8px; }
@@ -681,7 +682,9 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     .key-sig { position:absolute; transform:translate(-50%,-50%); color:rgba(24,32,29,.58); font-family:Georgia,serif; font-size:16px; font-weight:700; pointer-events:none; }
     .accidental { position:absolute; transform:translate(-135%,-50%); color:var(--ink); font-family:Georgia,serif; font-size:13px; font-weight:700; z-index:5; }
     .octave-mark { position:absolute; transform:translate(-50%,-50%); color:var(--accent); font-size:10px; font-weight:800; z-index:5; white-space:nowrap; }
-    .velocity-lane { position:absolute; left:78px; right:22px; bottom:38px; height:82px; border-top:1px solid var(--line); background:linear-gradient(to top, rgba(24,32,29,.05) 1px, transparent 1px) 0 0/100% 20px; }
+    .velocity-lane { position:absolute; left:78px; right:22px; bottom:38px; height:82px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:rgba(24,32,29,.025); }
+    .velocity-grid-line { position:absolute; left:78px; right:22px; height:1px; border-top:1px dashed rgba(24,32,29,.18); z-index:2; }
+    .velocity-grid-label { position:absolute; left:50px; transform:translateY(50%); color:var(--muted); font-size:10px; font-weight:700; z-index:2; }
     .velocity-bar { position:absolute; bottom:38px; width:4px; min-height:3px; transform:translateX(-50%); border-radius:3px 3px 0 0; opacity:.9; z-index:4; }
     .velocity-title { position:absolute; left:10px; bottom:100px; color:var(--muted); font-size:11px; font-weight:750; }
     .ruler-tick { position:absolute; bottom:24px; width:1px; height:8px; background:#bfc8c0; z-index:2; }
@@ -787,10 +790,11 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     function visibleHistory(history){ return history.filter(group=>Number(group.timeMs)>state.cutoffTimeMs); }
     function renderChord(group){
       const keyboard=$("keyboard"); const cards=$("cards"); keyboard.innerHTML=""; cards.innerHTML="";
-      for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${28+band.value/127*132}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
+      const chordGraphHeight = 160;
+      for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${band.value/127*chordGraphHeight}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
       if(!group){ $("chordSummary").textContent="等待输入"; return; }
       $("chordSummary").textContent=`${group.notes.length} 音 · 平均 ${group.average} · 差距 ${group.spread}`;
-      for(const note of group.notes){ const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${28+note.velocity/127*132}px`; marker.innerHTML=`<span class="value">${note.name} ${note.velocity}</span>`; keyboard.append(marker);
+      for(const note of group.notes){ const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${Math.max(2,note.velocity/127*chordGraphHeight)}px`; marker.innerHTML=`<span class="value">${note.name} ${note.velocity}</span>`; keyboard.append(marker);
         const card=document.createElement("article"); card.className="card"; card.innerHTML=`<strong>${note.name}</strong><div class="mini"><span>力度</span><div class="track"><div class="fill ${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></div></div><b>${note.velocity}</b></div>`; cards.append(card); }
     }
     function renderTimeline(history){
@@ -838,6 +842,7 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
       add(el,"staff-clef bass",{},"𝄢");
       renderKeySignature(el);
       add(el,"velocity-lane",{});
+      renderVelocityGrid(el);
       add(el,"velocity-title",{},"velocity");
       const accidentalMemory = new Map();
       let eventIndex = 0;
@@ -853,10 +858,18 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
           const accidental=accidentalForSpelling(accidentalMemory, spelling, group.timeMs, eventIndex);
           if(accidental) add(el,"accidental",{left:`calc(${x}% + ${dx - noteIndex * 5}px)`,top:`${y}px`},accidental);
           if(display.mark) add(el,"octave-mark",{left:`calc(${x}% + ${dx}px)`,top:`${display.markY}px`},display.mark);
-          add(el,"velocity-bar",{left:`calc(${x}% + ${dx}px)`,height:`${Math.max(3,note.velocity/127*72)}px`,background:c}).title=`${spelling.name} · ${note.velocity}`;
+          add(el,"velocity-bar",{left:`calc(${x}% + ${dx}px)`,height:`${Math.max(3,note.velocity/127*82)}px`,background:c}).title=`${spelling.name} · ${note.velocity}`;
           eventIndex += 1;
         });
       });
+    }
+    function renderVelocityGrid(el){
+      const laneBottom=38, laneHeight=82;
+      for(const value of [0,20,40,60,80,100,127]){
+        const bottom=laneBottom + value/127*laneHeight;
+        add(el,"velocity-grid-line",{bottom:`${bottom}px`});
+        add(el,"velocity-grid-label",{bottom:`${bottom}px`},String(value));
+      }
     }
     function staffStepFromSpelling(spelling){ return spelling.octave*7+spelling.letterIndex; }
     function staffYFromSpelling(spelling){ return 122-(staffStepFromSpelling(spelling)-28)*6; }
