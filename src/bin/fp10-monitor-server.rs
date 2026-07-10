@@ -842,14 +842,23 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     </section>
   </main>
   <script>
-    const state = { cutoffTimeMs: 0, cutoffMessageCount: 0 };
+    const state = { cutoffTimeMs: 0, cutoffMessageCount: 0, latestData: null };
+    const storageKey = "fp10-monitor-settings";
     const bands = [{value:20,label:"pp"},{value:40,label:"p"},{value:60,label:"mp"},{value:80,label:"mf"},{value:100,label:"f"},{value:127,label:"ff"}];
     const $ = (id) => document.getElementById(id);
+    function loadSettings(){ try{ return JSON.parse(localStorage.getItem(storageKey) || "{}") || {}; } catch(e){ return {}; } }
+    function saveSettings(settings){ try{ localStorage.setItem(storageKey, JSON.stringify(settings)); } catch(e){} }
+    function updateSettings(patch){ saveSettings({...loadSettings(), ...patch}); }
+    function restoreSettings(){
+      const settings=loadSettings();
+      if(settings.key && [...$("keySelect").options].some(option=>option.value===settings.key)) $("keySelect").value=settings.key;
+    }
     function cls(v){ if(v<=20)return"velocity-pp"; if(v<=40)return"velocity-p"; if(v<=60)return"velocity-mp"; if(v<=80)return"velocity-mf"; if(v<=100)return"velocity-f"; return"velocity-ff"; }
     function color(v){ return getComputedStyle(document.documentElement).getPropertyValue(`--${cls(v).replace("velocity-","")}`).trim(); }
     function notePos(note){ const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]; const isBlack=(n)=>names[n%12].includes("#"); let count=0; for(let n=21;n<Math.max(21,Math.min(108,note));n++) if(!isBlack(n)) count++; const center=isBlack(note)?count:count+.5; return center/52*100; }
     function time(ms){ return new Date(Number(ms)).toLocaleTimeString("zh-CN",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit",fractionalSecondDigits:2}); }
     function spell(note){ return spellingFor(note).name; }
+    function noteLabel(note){ return spell(note.note); }
     function spellingFor(note){
       const pc=note%12; const octave=Math.floor(note/12)-1; const info=keyInfo();
       if(info.scale[pc]){
@@ -868,11 +877,12 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
       return {letter,letterIndex:index,octave,accidental,name:`${letter}${accidental}${octave}`};
     }
     function render(data){
+      state.latestData = data;
       $("status").textContent = `${data.inputName} · ${data.messageCount} messages`;
       const last = data.lastNote;
       const history = visibleHistory(data.history || []);
       const raw = (data.raw || []).filter(e=>Number(e.timeMs)>state.cutoffTimeMs);
-      if(last && history.length){ $("lastName").textContent=last.name; $("lastVelocity").textContent=last.velocity; $("lastBar").style.width=`${last.velocity/127*100}%`; $("lastBar").className=`fill ${cls(last.velocity)}`; $("lastMark").textContent=last.mark; }
+      if(last && history.length){ $("lastName").textContent=noteLabel(last); $("lastVelocity").textContent=last.velocity; $("lastBar").style.width=`${last.velocity/127*100}%`; $("lastBar").className=`fill ${cls(last.velocity)}`; $("lastMark").textContent=last.mark; }
       else { $("lastName").textContent="-"; $("lastVelocity").textContent="0"; $("lastBar").style.width="0%"; $("lastMark").textContent="-"; }
       renderChord(data.currentChord);
       renderTimeline(history);
@@ -886,8 +896,8 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
       for(const band of bands){ const g=document.createElement("div"); g.className="guide"; g.style.bottom=`${band.value/127*chordGraphHeight}px`; g.innerHTML=`<span>${band.label}</span><b>${band.value}</b>`; keyboard.append(g); }
       if(!group){ $("chordSummary").textContent="等待输入"; return; }
       $("chordSummary").textContent=`${group.notes.length} 音 · 平均 ${group.average} · 差距 ${group.spread}`;
-      for(const note of group.notes){ const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${Math.max(2,note.velocity/127*chordGraphHeight)}px`; marker.innerHTML=`<span class="value">${note.name} ${note.velocity}</span>`; keyboard.append(marker);
-        const card=document.createElement("article"); card.className="card"; card.innerHTML=`<strong>${note.name}</strong><div class="mini"><span>力度</span><div class="track"><div class="fill ${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></div></div><b>${note.velocity}</b></div>`; cards.append(card); }
+      for(const note of group.notes){ const name=noteLabel(note); const marker=document.createElement("div"); marker.className=`key ${cls(note.velocity)}`; marker.style.left=`${notePos(note.note)}%`; marker.style.height=`${Math.max(2,note.velocity/127*chordGraphHeight)}px`; marker.innerHTML=`<span class="value">${name} ${note.velocity}</span>`; keyboard.append(marker);
+        const card=document.createElement("article"); card.className="card"; card.innerHTML=`<strong>${name}</strong><div class="mini"><span>力度</span><div class="track"><div class="fill ${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></div></div><b>${note.velocity}</b></div>`; cards.append(card); }
     }
     function renderTimeline(history){
       const timeline=$("timeline"); const groups=visibleGroups(history); timeline.innerHTML="";
@@ -1045,11 +1055,13 @@ const INDEX_HTML_V2: &str = r####"<!doctype html>
     }
     function renderHistory(history){
       $("historySummary").textContent=`${history.length} groups`;
-      $("history").innerHTML = history.map((group,index)=>`<tr class="group-row"><td colspan="4"><div class="group-meta"><strong>#${history.length-index}</strong><span>${time(group.timeMs)}</span><span>${group.notes.length} 音 · ${group.notes.map(n=>n.name).join(" ")}</span><span>平均 ${group.average}</span><span>差距 ${group.spread}</span></div></td></tr>${group.notes.map(note=>`<tr><td></td><td><span class="pill">${note.name}</span></td><td><div class="history-meter"><span class="${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></span><b>${note.velocity}</b></div></td><td>${note.mark}</td></tr>`).join("")}`).join("");
+      $("history").innerHTML = history.map((group,index)=>`<tr class="group-row"><td colspan="4"><div class="group-meta"><strong>#${history.length-index}</strong><span>${time(group.timeMs)}</span><span>${group.notes.length} 音 · ${group.notes.map(noteLabel).join(" ")}</span><span>平均 ${group.average}</span><span>差距 ${group.spread}</span></div></td></tr>${group.notes.map(note=>`<tr><td></td><td><span class="pill">${noteLabel(note)}</span></td><td><div class="history-meter"><span class="${cls(note.velocity)}" style="width:${note.velocity/127*100}%"></span><b>${note.velocity}</b></div></td><td>${note.mark}</td></tr>`).join("")}`).join("");
     }
     function renderRaw(raw,count){ $("rawSummary").textContent=`${count} messages`; $("raw").innerHTML=raw.map(e=>`<div class="raw-row"><span>${time(e.timeMs)}</span><strong>${e.kind}</strong><span>ch ${e.channel}</span><code>${e.bytes}</code></div>`).join(""); }
     $("clearView").addEventListener("click",async()=>{ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); state.cutoffTimeMs=Date.now(); state.cutoffMessageCount=data.messageCount||0; render({...data,history:[],raw:[],lastNote:null,currentChord:null}); } catch(e){ state.cutoffTimeMs=Date.now(); } });
     $("seedLog").addEventListener("click",async()=>{ const button=$("seedLog"); button.disabled=true; button.textContent="载入中"; try{ const result=await fetch("/seed-log",{cache:"no-store"}).then(r=>r.json()); button.textContent=result.loaded ? `已载入 ${result.loaded}` : "无日志"; } catch(e){ button.textContent="载入失败"; } setTimeout(()=>{ button.disabled=false; button.textContent="载入日志"; },1400); });
+    restoreSettings();
+    $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
     let pollingTimer = null;
     let eventSource = null;
     async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } }
