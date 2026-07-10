@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FP-10 Native MIDI Monitor</title>
+  <link rel="stylesheet" href="/assets/monitor.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>FP-10 Native MIDI Monitor</h1>
+        <p class="subtitle">Rust 后端读取 MIDI，浏览器只显示数据。</p>
+      </div>
+      <div class="status" id="status">连接中</div>
+    </header>
+    <section class="grid">
+      <section class="panel">
+        <div class="heading"><h2>当前和弦</h2><div class="summary" id="chordSummary">等待输入</div></div>
+        <div class="keyboard" id="keyboard"></div>
+        <div class="cards" id="cards"></div>
+      </section>
+      <section class="panel meter">
+        <div class="heading"><h2>当前力度</h2><div class="summary" id="lastName">-</div></div>
+        <strong id="lastVelocity">0</strong>
+        <div class="bigbar"><div class="fill" id="lastBar" style="width:0%"></div></div>
+        <div class="dynamic" id="lastMark">-</div>
+      </section>
+    </section>
+    <section class="panel timeline">
+      <div class="heading">
+        <div><h2>最近演奏</h2><div class="summary" id="timelineSummary">时间从左到右，最新在右侧</div></div>
+        <div class="tools">
+          <select id="keySelect" aria-label="key">
+            <option value="C">C</option><option value="G">G</option><option value="D">D</option><option value="A">A</option><option value="E">E</option><option value="F">F</option><option value="Bb">Bb</option><option value="Eb">Eb</option>
+          </select>
+          <button type="button" class="ghost" id="clearView">清屏</button>
+          <button type="button" class="ghost" id="seedLog">载入日志</button>
+        </div>
+      </div>
+      <div class="plot" id="timeline"></div>
+    </section>
+    <section class="lower">
+      <section class="panel">
+        <div class="heading"><h2>击键 Log</h2><div class="summary" id="historySummary">0 groups</div></div>
+        <div class="table-wrap"><table><thead><tr><th>时间</th><th>音</th><th>力度</th><th>动态</th></tr></thead><tbody id="history"></tbody></table></div>
+      </section>
+      <section class="panel">
+        <div class="heading"><h2>原始 MIDI</h2><div class="summary" id="rawSummary">0 messages</div></div>
+        <div class="raw" id="raw"></div>
+      </section>
+    </section>
+  </main>
+  <script src="/assets/monitor.js"></script>
+</body>
+</html>
