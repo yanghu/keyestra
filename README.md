@@ -82,7 +82,7 @@ Right-click the tray icon for:
 - Start mapper
 - Stop mapper
 - Restart mapper
-- Select the forum curve or mid-control curve
+- Select the forum curve or mid-control curve; the tray remembers the last selected curve
 - Install startup
 - Uninstall startup
 - Exit

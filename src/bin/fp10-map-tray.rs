@@ -2,13 +2,13 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::net::UdpSocket;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoop};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
@@ -85,9 +85,15 @@ enum CurveChoice {
     Custom,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct TraySettings {
+    curve: Option<PathBuf>,
+}
+
 struct Supervisor {
     mapper: MapperProcess,
     monitor: MonitorProcess,
+    settings_path: PathBuf,
     mapper_desired: DesiredState,
     monitor_desired: DesiredState,
     mapper_runtime: RuntimeState,
@@ -226,10 +232,11 @@ impl MonitorProcess {
 }
 
 impl Supervisor {
-    fn new(mapper: MapperProcess, monitor: MonitorProcess) -> Self {
+    fn new(mapper: MapperProcess, monitor: MonitorProcess, settings_path: PathBuf) -> Self {
         Self {
             mapper,
             monitor,
+            settings_path,
             mapper_desired: DesiredState::Running,
             monitor_desired: DesiredState::Running,
             mapper_runtime: RuntimeState::Stopped,
@@ -336,6 +343,7 @@ impl Supervisor {
 
     fn select_curve(&mut self, curve: PathBuf) {
         self.mapper.set_curve(curve);
+        let _ = save_tray_settings(&self.settings_path, &self.mapper.curve);
         self.restart_mapper();
     }
 
@@ -405,13 +413,6 @@ impl Supervisor {
     fn monitor_url(&self) -> String {
         format!("http://localhost:{}/", self.monitor.port)
     }
-
-    fn phone_url_text(&self) -> String {
-        match local_lan_ip() {
-            Some(ip) => format!("Phone URL: http://{}:{}/", ip, self.monitor.port),
-            None => format!("Phone URL: use this PC IP:{}", self.monitor.port),
-        }
-    }
 }
 
 fn main() -> Result<()> {
@@ -430,7 +431,15 @@ fn main() -> Result<()> {
     let app_data = app_data_dir()?;
     let mapper_log_path = app_data.join("tray.log");
     let monitor_log_path = app_data.join("monitor.log");
-    let curve = cli.curve.unwrap_or_else(default_curve_path);
+    let settings_path = app_data.join("tray-settings.toml");
+    let curve = cli
+        .curve
+        .or_else(|| {
+            load_tray_settings(&settings_path)
+                .ok()
+                .and_then(|settings| settings.curve)
+        })
+        .unwrap_or_else(default_curve_path);
     let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log_path);
     let monitor = MonitorProcess::new(
         cli.monitor_input,
@@ -439,7 +448,7 @@ fn main() -> Result<()> {
         monitor_log_path,
     );
 
-    run_tray(Supervisor::new(mapper, monitor))
+    run_tray(Supervisor::new(mapper, monitor, settings_path))
 }
 
 fn run_tray(mut supervisor: Supervisor) -> Result<()> {
@@ -448,7 +457,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
 
     let mapper_status_item = MenuItem::new("Mapper: Starting", false, None);
     let monitor_status_item = MenuItem::new("Monitor: Starting", false, None);
-    let phone_url_item = MenuItem::new(supervisor.phone_url_text(), false, None);
     let open_monitor_item = MenuItem::new("Open monitor page", true, None);
     let restart_all_item = MenuItem::new("Restart all", true, None);
     let start_item = MenuItem::new("Start mapper", true, None);
@@ -469,8 +477,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     tray_menu.append_items(&[
         &mapper_status_item,
         &monitor_status_item,
-        &phone_url_item,
-        &PredefinedMenuItem::separator(),
         &open_monitor_item,
         &restart_all_item,
         &PredefinedMenuItem::separator(),
@@ -629,12 +635,6 @@ fn open_url(url: &str) -> Result<()> {
     }
 }
 
-fn local_lan_ip() -> Option<String> {
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    Some(socket.local_addr().ok()?.ip().to_string())
-}
-
 fn default_curve_path() -> PathBuf {
     curve_path("curve.toml")
 }
@@ -694,6 +694,30 @@ fn app_data_dir() -> Result<PathBuf> {
     let dir = PathBuf::from(appdata).join("fp10-map");
     fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+fn load_tray_settings(path: &Path) -> Result<TraySettings> {
+    if !path.exists() {
+        return Ok(TraySettings::default());
+    }
+
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read tray settings {}", path.display()))?;
+    toml::from_str(&text)
+        .with_context(|| format!("Failed to parse tray settings {}", path.display()))
+}
+
+fn save_tray_settings(path: &Path, curve: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let settings = TraySettings {
+        curve: Some(curve.to_path_buf()),
+    };
+    let text = toml::to_string_pretty(&settings)?;
+    fs::write(path, text)
+        .with_context(|| format!("Failed to write tray settings {}", path.display()))
 }
 
 fn startup_script_path() -> Result<PathBuf> {
