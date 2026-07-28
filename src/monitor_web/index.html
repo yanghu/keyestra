@@ -38,6 +38,58 @@
         </div>
       </div>
       <div class="recorder-message" id="recorderMessage"></div>
+      <details class="clip-editor" id="clipEditor">
+        <summary>编辑片段</summary>
+        <div class="clip-editor-body">
+          <div class="clip-toolbar">
+            <div class="clip-presets" aria-label="时间轴范围">
+              <button type="button" data-clip-view="30000000">30 秒</button>
+              <button type="button" data-clip-view="120000000">2 分钟</button>
+              <button type="button" data-clip-view="300000000">5 分钟</button>
+              <button type="button" data-clip-view="all">全部</button>
+            </div>
+            <select id="clipOutput" aria-label="试听 MIDI 输出">
+              <option value="FP10 Mapped">FP10 Mapped</option>
+            </select>
+          </div>
+          <div class="clip-rail" id="clipRail" aria-label="MIDI 活动时间轴">
+            <div class="clip-bins" id="clipBins"></div>
+            <div class="clip-outside clip-outside-start" id="clipOutsideStart"></div>
+            <div class="clip-outside clip-outside-end" id="clipOutsideEnd"></div>
+            <div class="clip-selection" id="clipSelection" aria-label="拖动所选片段"></div>
+            <div class="clip-playhead" id="clipPlayhead"></div>
+            <button type="button" class="clip-handle clip-handle-start" id="clipStartHandle"
+              role="slider" aria-label="片段开始"></button>
+            <button type="button" class="clip-handle clip-handle-end" id="clipEndHandle"
+              role="slider" aria-label="片段结束"></button>
+          </div>
+          <div class="clip-times">
+            <div><span>开始</span><strong id="clipStartTime">--</strong></div>
+            <div><span>结束</span><strong id="clipEndTime">--</strong></div>
+            <div><span>时长</span><strong id="clipDuration">--</strong></div>
+            <div><span>Note On</span><strong id="clipNoteCount">--</strong></div>
+            <div><span>事件</span><strong id="clipEventCount">--</strong></div>
+          </div>
+          <div class="clip-adjust">
+            <div class="clip-focus" role="group" aria-label="调整边界">
+              <button type="button" data-clip-focus="start">调整开始</button>
+              <button type="button" data-clip-focus="end">调整结束</button>
+            </div>
+            <div class="clip-nudges" role="group" aria-label="微调所选边界">
+              <button type="button" data-clip-nudge="-1000000">−1s</button>
+              <button type="button" data-clip-nudge="-100000">−100ms</button>
+              <button type="button" data-clip-nudge="100000">+100ms</button>
+              <button type="button" data-clip-nudge="1000000">+1s</button>
+            </div>
+          </div>
+          <div class="clip-actions">
+            <button type="button" id="clipPlay">试听</button>
+            <button type="button" id="clipStop">停止</button>
+            <button type="button" id="clipSave">保存此片段</button>
+          </div>
+          <div class="clip-status" id="clipStatus">打开编辑器后会载入滚动缓存。</div>
+        </div>
+      </details>
       <details class="recorder-files">
         <summary>已保存的 MIDI</summary>
         <div id="recorderFileList" class="recorder-file-list"><span>还没有保存文件</span></div>

@@ -180,6 +180,10 @@ Open the monitor page from the tray menu on a computer or phone to:
 
 - Mark the beginning and end of a take, then save it.
 - Save the latest 5 or 15 minutes without having started a take first.
+- Expand **编辑片段** to inspect the activity timeline, select an exact range
+  with touch-friendly handles, and fine-adjust either boundary.
+- Preview that prepared range through the computer's MIDI sound source and save
+  the same range as a standard MIDI file.
 - Download any of the 20 most recently saved `.mid` files.
 
 Recordings are written atomically to:
@@ -196,16 +200,15 @@ channel used by the take to prevent stuck notes during playback.
 The rolling buffer currently lives in memory, so restarting the monitor clears
 unsaved material. Saved `.mid` files remain on disk.
 
-Planned recorder follow-ups:
+Preview runs on the computer and defaults to the `FP10 Mapped` MIDI output.
+Rolling capture pauses during preview so playback returning through that
+virtual port cannot contaminate the buffer, then resumes shortly after cleanup.
+The live Monitor display can still show those messages. Preview is unavailable
+while a Take is actively recording.
 
-- Preview a saved or buffered range from the phone.
-- Show a compact performance timeline and drag exact start/end handles before
-  saving.
-- The implementation design is in
-  [`docs/RECORDER_PREVIEW_DESIGN.md`](docs/RECORDER_PREVIEW_DESIGN.md).
-- Add a crash-recoverable rolling journal for unsaved performances.
-- Replay through a selectable MIDI output and stop safely with sustain/all
-  notes off.
+The detailed boundary and API design is in
+[`docs/RECORDER_PREVIEW_DESIGN.md`](docs/RECORDER_PREVIEW_DESIGN.md). A
+crash-recoverable rolling journal remains a future enhancement.
 
 ## Current Scope
 

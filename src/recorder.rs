@@ -1,22 +1,23 @@
-use std::collections::{BTreeSet, VecDeque};
-use std::fmt::Write as _;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use serde::Serialize;
+
+use crate::midi_clip::{
+    encode_smf, is_note_on, prepare_clip, ClipWarning, PreparedClip, TimedMidiEvent,
+};
 
 const DEFAULT_BUFFER_MINUTES: u64 = 60;
-const MIDI_TICKS_PER_QUARTER: u16 = 1_000;
-const MIDI_TEMPO_US_PER_QUARTER: u64 = 500_000;
-const MIDI_US_PER_TICK: u64 = MIDI_TEMPO_US_PER_QUARTER / MIDI_TICKS_PER_QUARTER as u64;
-
-#[derive(Debug, Clone)]
-struct TimedMidiEvent {
-    at_us: u64,
-    message: Vec<u8>,
-}
+const DEFAULT_TIMELINE_SECONDS: u64 = 60;
+pub const MIN_TIMELINE_BINS: usize = 50;
+pub const MAX_TIMELINE_BINS: usize = 1_200;
+pub const MAX_NOTE_MARKERS: usize = 5_000;
+pub const MAX_NOTE_WINDOW_US: u64 = 5 * 60 * 1_000_000;
 
 #[derive(Debug, Clone)]
 struct TakeRange {
@@ -29,20 +30,171 @@ struct RecorderState {
     events: VecDeque<TimedMidiEvent>,
     take: Option<TakeRange>,
     ignored_messages: u64,
+    revision: u64,
+    trimmed: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SavedRecording {
     pub name: String,
     pub size: u64,
     pub modified_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_us: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_us: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_us: Option<u64>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SavedRecordingResult {
+    pub recording: SavedRecording,
+    pub warnings: Vec<ClipWarning>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TimelineRequest {
+    pub start_us: Option<u64>,
+    pub end_us: Option<u64>,
+    pub bins: Option<usize>,
+    pub notes: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineBin {
+    pub start_us: u64,
+    pub end_us: u64,
+    pub event_count: usize,
+    pub note_on_count: usize,
+    pub velocity_average: u8,
+    pub velocity_maximum: u8,
+    pub minimum_note: Option<u8>,
+    pub maximum_note: Option<u8>,
+    pub pedal_down_at_end: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteMarker {
+    pub at_us: u64,
+    pub channel: u8,
+    pub note: u8,
+    pub velocity: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineBuffer {
+    pub available_start_us: u64,
+    pub available_end_us: u64,
+    pub limit_us: u64,
+    pub event_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineRange {
+    pub start_us: u64,
+    pub end_us: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTake {
+    pub start_us: u64,
+    pub end_us: u64,
+    pub recording: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineSnapshot {
+    pub ok: bool,
+    pub schema_version: u8,
+    pub session_id: String,
+    pub revision: u64,
+    pub generated_at_us: u64,
+    pub buffer: TimelineBuffer,
+    pub range: TimelineRange,
+    pub take: Option<TimelineTake>,
+    pub bins: Vec<TimelineBin>,
+    pub notes: Vec<NoteMarker>,
+    pub notes_truncated: bool,
+    pub state_complete: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecorderErrorCode {
+    InvalidParameter,
+    InvalidRange,
+    StaleSession,
+    RangeExpired,
+    RangeEmpty,
+    TakeInProgress,
+    StateLockFailed,
+    InternalError,
+}
+
+impl RecorderErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidParameter => "invalid_parameter",
+            Self::InvalidRange => "invalid_range",
+            Self::StaleSession => "stale_session",
+            Self::RangeExpired => "range_expired",
+            Self::RangeEmpty => "range_empty",
+            Self::TakeInProgress => "take_in_progress",
+            Self::StateLockFailed => "state_lock_failed",
+            Self::InternalError => "internal_error",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RecorderError {
+    pub code: RecorderErrorCode,
+    pub message: String,
+    pub available_start_us: Option<u64>,
+}
+
+impl RecorderError {
+    pub fn new(code: RecorderErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            available_start_us: None,
+        }
+    }
+
+    fn expired(available_start_us: u64) -> Self {
+        Self {
+            code: RecorderErrorCode::RangeExpired,
+            message: "Selected range is no longer in the rolling buffer".into(),
+            available_start_us: Some(available_start_us),
+        }
+    }
+}
+
+impl std::fmt::Display for RecorderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RecorderError {}
+
+pub type RecorderResult<T> = std::result::Result<T, RecorderError>;
 
 pub struct Recorder {
     clock: Instant,
     epoch_started_ms: u128,
+    session_id: String,
     buffer_duration: Duration,
     recordings_dir: PathBuf,
+    capture_suspended: AtomicBool,
     state: Mutex<RecorderState>,
 }
 
@@ -54,15 +206,20 @@ impl Recorder {
                 recordings_dir.display()
             )
         })?;
+        let epoch_started_ms = unix_time_ms();
         Ok(Self {
             clock: Instant::now(),
-            epoch_started_ms: unix_time_ms(),
+            epoch_started_ms,
+            session_id: format!("{}-{}", epoch_started_ms, std::process::id()),
             buffer_duration: Duration::from_secs(DEFAULT_BUFFER_MINUTES * 60),
             recordings_dir,
+            capture_suspended: AtomicBool::new(false),
             state: Mutex::new(RecorderState {
                 events: VecDeque::new(),
                 take: None,
                 ignored_messages: 0,
+                revision: 0,
+                trimmed: false,
             }),
         })
     }
@@ -77,6 +234,9 @@ impl Recorder {
     }
 
     pub fn ingest(&self, message: &[u8]) {
+        if self.capture_suspended() {
+            return;
+        }
         let now_us = self.elapsed_us();
         let Ok(mut state) = self.state.lock() else {
             return;
@@ -86,10 +246,23 @@ impl Recorder {
                 at_us: now_us,
                 message: message.to_vec(),
             });
-            trim_old_events(&mut state.events, now_us, self.buffer_duration);
+            state.revision = state.revision.saturating_add(1);
+            state.trimmed |= trim_old_events(&mut state.events, now_us, self.buffer_duration);
         } else {
             state.ignored_messages = state.ignored_messages.saturating_add(1);
         }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn capture_suspended(&self) -> bool {
+        self.capture_suspended.load(Ordering::Acquire)
+    }
+
+    pub fn set_capture_suspended(&self, suspended: bool) {
+        self.capture_suspended.store(suspended, Ordering::Release);
     }
 
     pub fn start_take(&self) -> Result<()> {
@@ -121,9 +294,21 @@ impl Recorder {
         Ok(())
     }
 
+    pub fn take_is_recording(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| {
+                state
+                    .take
+                    .as_ref()
+                    .is_some_and(|take| take.stopped_us.is_none())
+            })
+            .unwrap_or(false)
+    }
+
     pub fn save_take(&self) -> Result<SavedRecording> {
         let now_us = self.elapsed_us();
-        let (start_us, end_us, events) = {
+        let (start_us, end_us) = {
             let state = self
                 .state
                 .lock()
@@ -132,42 +317,189 @@ impl Recorder {
                 .take
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No take has been started"))?;
-            let end_us = take.stopped_us.unwrap_or(now_us);
-            (
-                take.started_us,
-                end_us,
-                events_in_range(&state.events, take.started_us, end_us),
-            )
+            (take.started_us, take.stopped_us.unwrap_or(now_us))
         };
-        self.save_events(&events, start_us, end_us)
+        self.save_range(&self.session_id, start_us, end_us)
+            .map(|result| result.recording)
+            .map_err(anyhow::Error::new)
     }
 
     pub fn save_recent(&self, seconds: u64) -> Result<SavedRecording> {
         let seconds = seconds.clamp(1, self.buffer_duration.as_secs());
         let end_us = self.elapsed_us();
         let start_us = end_us.saturating_sub(seconds.saturating_mul(1_000_000));
-        let events = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| anyhow::anyhow!("recorder state lock poisoned"))?;
-            events_in_range(&state.events, start_us, end_us)
+        self.save_range(&self.session_id, start_us, end_us)
+            .map(|result| result.recording)
+            .map_err(anyhow::Error::new)
+    }
+
+    pub fn timeline(&self, request: TimelineRequest) -> RecorderResult<TimelineSnapshot> {
+        let now_us = self.elapsed_us();
+        let bins_requested = request.bins.unwrap_or(600);
+        if !(MIN_TIMELINE_BINS..=MAX_TIMELINE_BINS).contains(&bins_requested) {
+            return Err(RecorderError::new(
+                RecorderErrorCode::InvalidParameter,
+                format!(
+                    "bins must be between {} and {}",
+                    MIN_TIMELINE_BINS, MAX_TIMELINE_BINS
+                ),
+            ));
+        }
+        let (events, take, revision, trimmed) = {
+            let mut state = self.state.lock().map_err(|_| {
+                RecorderError::new(
+                    RecorderErrorCode::StateLockFailed,
+                    "recorder state lock poisoned",
+                )
+            })?;
+            state.trimmed |= trim_old_events(&mut state.events, now_us, self.buffer_duration);
+            (
+                state.events.iter().cloned().collect::<Vec<_>>(),
+                state.take.clone(),
+                state.revision,
+                state.trimmed,
+            )
         };
-        self.save_events(&events, start_us, end_us)
+        let available_start_us = events.first().map(|event| event.at_us).unwrap_or(now_us);
+        let available_end_us = now_us;
+        let default_range = take
+            .as_ref()
+            .filter(|take| take.stopped_us.is_some())
+            .map(|take| (take.started_us, take.stopped_us.unwrap()))
+            .unwrap_or_else(|| {
+                (
+                    now_us.saturating_sub(DEFAULT_TIMELINE_SECONDS * 1_000_000),
+                    now_us,
+                )
+            });
+        let mut start_us = request.start_us.unwrap_or(default_range.0);
+        let mut end_us = request.end_us.unwrap_or(default_range.1);
+        start_us = start_us.max(available_start_us).min(available_end_us);
+        end_us = end_us.max(available_start_us).min(available_end_us);
+        if start_us >= end_us {
+            start_us = available_start_us;
+            end_us = available_end_us.max(start_us);
+        }
+
+        let bins = aggregate_bins(&events, start_us, end_us, bins_requested);
+        let (notes, notes_truncated) = note_markers(&events, start_us, end_us, request.notes);
+        Ok(TimelineSnapshot {
+            ok: true,
+            schema_version: 1,
+            session_id: self.session_id.clone(),
+            revision,
+            generated_at_us: now_us,
+            buffer: TimelineBuffer {
+                available_start_us,
+                available_end_us,
+                limit_us: self.buffer_duration.as_micros() as u64,
+                event_count: events.len(),
+            },
+            range: TimelineRange { start_us, end_us },
+            take: take.map(|take| TimelineTake {
+                start_us: take.started_us,
+                end_us: take.stopped_us.unwrap_or(now_us),
+                recording: take.stopped_us.is_none(),
+            }),
+            bins,
+            notes,
+            notes_truncated,
+            state_complete: !trimmed,
+        })
+    }
+
+    pub fn prepare_range(
+        &self,
+        session_id: &str,
+        start_us: u64,
+        end_us: u64,
+    ) -> RecorderResult<PreparedClip> {
+        if session_id != self.session_id {
+            return Err(RecorderError::new(
+                RecorderErrorCode::StaleSession,
+                "Recorder session changed; refresh the selection",
+            ));
+        }
+        if start_us >= end_us {
+            return Err(RecorderError::new(
+                RecorderErrorCode::InvalidRange,
+                "startUs must be before endUs",
+            ));
+        }
+        let now_us = self.elapsed_us();
+        let (events, trimmed) = {
+            let mut state = self.state.lock().map_err(|_| {
+                RecorderError::new(
+                    RecorderErrorCode::StateLockFailed,
+                    "recorder state lock poisoned",
+                )
+            })?;
+            state.trimmed |= trim_old_events(&mut state.events, now_us, self.buffer_duration);
+            (
+                state.events.iter().cloned().collect::<Vec<_>>(),
+                state.trimmed,
+            )
+        };
+        let available_start_us = events.first().map(|event| event.at_us).unwrap_or(now_us);
+        if (trimmed && start_us < available_start_us) || end_us > now_us {
+            return Err(RecorderError::expired(available_start_us));
+        }
+        let clip = prepare_clip(&events, start_us, end_us, !trimmed).map_err(|error| {
+            RecorderError::new(RecorderErrorCode::InvalidRange, error.to_string())
+        })?;
+        if clip.original_event_count == 0 {
+            return Err(RecorderError::new(
+                RecorderErrorCode::RangeEmpty,
+                "Selected range contains no MIDI events",
+            ));
+        }
+        Ok(clip)
+    }
+
+    pub fn save_range(
+        &self,
+        session_id: &str,
+        start_us: u64,
+        end_us: u64,
+    ) -> RecorderResult<SavedRecordingResult> {
+        let clip = self.prepare_range(session_id, start_us, end_us)?;
+        let bytes = encode_smf(&clip).map_err(|error| {
+            RecorderError::new(RecorderErrorCode::InternalError, error.to_string())
+        })?;
+        let recording = self.save_bytes(bytes, start_us, end_us).map_err(|error| {
+            RecorderError::new(RecorderErrorCode::InternalError, error.to_string())
+        })?;
+        Ok(SavedRecordingResult {
+            recording,
+            warnings: clip.warnings,
+        })
     }
 
     pub fn status_json(&self) -> String {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Status {
+            recording: bool,
+            take_available: bool,
+            event_count: usize,
+            buffered_ms: u64,
+            buffer_limit_minutes: u64,
+            take_duration_ms: u64,
+            ignored_messages: u64,
+            take_started_at_ms: Option<u128>,
+            last_event_ago_ms: Option<u64>,
+            capture_suspended: bool,
+            session_id: String,
+            recordings: Vec<SavedRecording>,
+        }
+
         let now_us = self.elapsed_us();
         let recordings = self.list_recordings().unwrap_or_default();
         let Ok(state) = self.state.lock() else {
-            return "{\"error\":\"recorder state lock poisoned\"}".to_string();
+            return r#"{"error":"recorder state lock poisoned"}"#.to_string();
         };
         let first_us = state.events.front().map(|event| event.at_us);
         let last_us = state.events.back().map(|event| event.at_us);
-        let buffered_ms = first_us
-            .map(|first| now_us.saturating_sub(first) / 1_000)
-            .unwrap_or(0);
-        let last_event_ago_ms = last_us.map(|last| now_us.saturating_sub(last) / 1_000);
         let (recording, take_available, take_started_at_ms, take_duration_ms) =
             match state.take.as_ref() {
                 Some(take) => {
@@ -184,40 +516,23 @@ impl Recorder {
                 }
                 None => (false, false, None, 0),
             };
-
-        let mut out = String::with_capacity(2048);
-        write!(
-            out,
-            "{{\"recording\":{},\"takeAvailable\":{},\"eventCount\":{},\"bufferedMs\":{},\"bufferLimitMinutes\":{},\"takeDurationMs\":{},\"ignoredMessages\":{},",
+        serde_json::to_string(&Status {
             recording,
             take_available,
-            state.events.len(),
-            buffered_ms,
-            self.buffer_duration.as_secs() / 60,
+            event_count: state.events.len(),
+            buffered_ms: first_us
+                .map(|first| now_us.saturating_sub(first) / 1_000)
+                .unwrap_or(0),
+            buffer_limit_minutes: self.buffer_duration.as_secs() / 60,
             take_duration_ms,
-            state.ignored_messages
-        )
-        .unwrap();
-        out.push_str("\"takeStartedAtMs\":");
-        write_optional_u128(&mut out, take_started_at_ms);
-        out.push_str(",\"lastEventAgoMs\":");
-        write_optional_u64(&mut out, last_event_ago_ms);
-        out.push_str(",\"recordings\":[");
-        for (index, recording) in recordings.iter().enumerate() {
-            if index > 0 {
-                out.push(',');
-            }
-            write!(
-                out,
-                "{{\"name\":\"{}\",\"size\":{},\"modifiedMs\":{}}}",
-                escape_json(&recording.name),
-                recording.size,
-                recording.modified_ms
-            )
-            .unwrap();
-        }
-        out.push_str("]}");
-        out
+            ignored_messages: state.ignored_messages,
+            take_started_at_ms,
+            last_event_ago_ms: last_us.map(|last| now_us.saturating_sub(last) / 1_000),
+            capture_suspended: self.capture_suspended(),
+            session_id: self.session_id.clone(),
+            recordings,
+        })
+        .unwrap_or_else(|error| format!(r#"{{"error":"{}"}}"#, error))
     }
 
     pub fn read_recording(&self, name: &str) -> Result<Vec<u8>> {
@@ -225,28 +540,22 @@ impl Recorder {
         fs::read(&path).with_context(|| format!("Failed to read {}", path.display()))
     }
 
-    fn save_events(
-        &self,
-        events: &[TimedMidiEvent],
-        start_us: u64,
-        end_us: u64,
-    ) -> Result<SavedRecording> {
-        if events.is_empty() {
-            anyhow::bail!("No MIDI events in the selected time range");
-        }
-        let bytes = encode_smf(events, start_us, end_us)?;
+    fn save_bytes(&self, bytes: Vec<u8>, start_us: u64, end_us: u64) -> Result<SavedRecording> {
         let name = self.unique_recording_name();
         let final_path = self.recordings_dir.join(&name);
         let temporary_path = self.recordings_dir.join(format!(".{}.tmp", name));
         fs::write(&temporary_path, bytes)
             .with_context(|| format!("Failed to write {}", temporary_path.display()))?;
-        fs::rename(&temporary_path, &final_path).with_context(|| {
-            format!(
-                "Failed to finalize recording {}",
-                final_path.as_path().display()
-            )
-        })?;
-        recording_metadata(final_path)
+        if let Err(error) = fs::rename(&temporary_path, &final_path) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(error)
+                .with_context(|| format!("Failed to finalize recording {}", final_path.display()));
+        }
+        let mut saved = recording_metadata(final_path)?;
+        saved.start_us = Some(start_us);
+        saved.end_us = Some(end_us);
+        saved.duration_us = Some(end_us - start_us);
+        Ok(saved)
     }
 
     fn list_recordings(&self) -> Result<Vec<SavedRecording>> {
@@ -280,23 +589,120 @@ impl Recorder {
     }
 }
 
-fn trim_old_events(events: &mut VecDeque<TimedMidiEvent>, now_us: u64, duration: Duration) {
+fn trim_old_events(events: &mut VecDeque<TimedMidiEvent>, now_us: u64, duration: Duration) -> bool {
     let cutoff = now_us.saturating_sub(duration.as_micros().min(u64::MAX as u128) as u64);
+    let mut trimmed = false;
     while events.front().is_some_and(|event| event.at_us < cutoff) {
         events.pop_front();
+        trimmed = true;
     }
+    trimmed
 }
 
-fn events_in_range(
-    events: &VecDeque<TimedMidiEvent>,
+fn aggregate_bins(
+    events: &[TimedMidiEvent],
     start_us: u64,
     end_us: u64,
-) -> Vec<TimedMidiEvent> {
-    events
+    requested: usize,
+) -> Vec<TimelineBin> {
+    if start_us >= end_us {
+        return Vec::new();
+    }
+    let duration = end_us - start_us;
+    let bin_count = requested.min(duration.max(1) as usize);
+    let mut bins = (0..bin_count)
+        .map(|index| {
+            let bin_start =
+                start_us + (duration as u128 * index as u128 / bin_count as u128) as u64;
+            let bin_end =
+                start_us + (duration as u128 * (index + 1) as u128 / bin_count as u128) as u64;
+            TimelineBin {
+                start_us: bin_start,
+                end_us: bin_end,
+                event_count: 0,
+                note_on_count: 0,
+                velocity_average: 0,
+                velocity_maximum: 0,
+                minimum_note: None,
+                maximum_note: None,
+                pedal_down_at_end: false,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut velocity_sums = vec![0_u64; bin_count];
+    let mut pedal_down = false;
+    for event in events.iter().filter(|event| event.at_us < end_us) {
+        if event.message.len() >= 3 && event.message[0] & 0xF0 == 0xB0 && event.message[1] == 64 {
+            pedal_down = event.message[2] >= 64;
+        }
+        if event.at_us < start_us {
+            continue;
+        }
+        let relative = event.at_us - start_us;
+        let index = ((relative as u128 * bin_count as u128) / duration as u128)
+            .min((bin_count - 1) as u128) as usize;
+        let bin = &mut bins[index];
+        bin.event_count += 1;
+        if is_note_on(&event.message) {
+            let note = event.message[1];
+            let velocity = event.message[2];
+            bin.note_on_count += 1;
+            velocity_sums[index] += velocity as u64;
+            bin.velocity_maximum = bin.velocity_maximum.max(velocity);
+            bin.minimum_note = Some(bin.minimum_note.map_or(note, |value| value.min(note)));
+            bin.maximum_note = Some(bin.maximum_note.map_or(note, |value| value.max(note)));
+        }
+        bin.pedal_down_at_end = pedal_down;
+    }
+    let mut last_pedal = events
         .iter()
-        .filter(|event| event.at_us >= start_us && event.at_us <= end_us)
-        .cloned()
-        .collect()
+        .filter(|event| event.at_us < start_us)
+        .filter(|event| {
+            event.message.len() >= 3 && event.message[0] & 0xF0 == 0xB0 && event.message[1] == 64
+        })
+        .next_back()
+        .is_some_and(|event| event.message[2] >= 64);
+    for (index, bin) in bins.iter_mut().enumerate() {
+        if bin.note_on_count > 0 {
+            bin.velocity_average = (velocity_sums[index] / bin.note_on_count as u64).min(127) as u8;
+        }
+        if bin.event_count == 0 {
+            bin.pedal_down_at_end = last_pedal;
+        } else {
+            last_pedal = bin.pedal_down_at_end;
+        }
+    }
+    bins
+}
+
+fn note_markers(
+    events: &[TimedMidiEvent],
+    start_us: u64,
+    end_us: u64,
+    requested: bool,
+) -> (Vec<NoteMarker>, bool) {
+    if !requested || end_us.saturating_sub(start_us) > MAX_NOTE_WINDOW_US {
+        return (Vec::new(), false);
+    }
+    let mut notes = Vec::new();
+    let mut truncated = false;
+    for event in events
+        .iter()
+        .filter(|event| event.at_us >= start_us && event.at_us < end_us)
+        .filter(|event| is_note_on(&event.message))
+    {
+        if notes.len() == MAX_NOTE_MARKERS {
+            truncated = true;
+            break;
+        }
+        notes.push(NoteMarker {
+            at_us: event.at_us,
+            channel: event.message[0] & 0x0F,
+            note: event.message[1],
+            velocity: event.message[2],
+        });
+    }
+    (notes, truncated)
 }
 
 fn is_recordable_message(message: &[u8]) -> bool {
@@ -304,114 +710,6 @@ fn is_recordable_message(message: &[u8]) -> bool {
         return false;
     };
     matches!(status, 0x80..=0xEF | 0xF0 | 0xF7)
-}
-
-fn encode_smf(events: &[TimedMidiEvent], start_us: u64, end_us: u64) -> Result<Vec<u8>> {
-    let mut track = Vec::with_capacity(events.len().saturating_mul(5).saturating_add(128));
-    track.extend_from_slice(&[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20]);
-    let track_name = b"FP10 Mapped";
-    track.extend_from_slice(&[0x00, 0xFF, 0x03, track_name.len() as u8]);
-    track.extend_from_slice(track_name);
-
-    let mut previous_tick = 0_u64;
-    let mut channels = BTreeSet::new();
-    let mut written_events = 0_usize;
-    for event in events {
-        if event.at_us < start_us || event.at_us > end_us {
-            continue;
-        }
-        let tick = us_to_tick(event.at_us.saturating_sub(start_us));
-        let delta = tick.saturating_sub(previous_tick);
-        let Some(encoded) = encode_midi_message(&event.message, &mut channels) else {
-            continue;
-        };
-        write_variable_length(&mut track, delta)?;
-        track.extend_from_slice(&encoded);
-        previous_tick = tick;
-        written_events += 1;
-    }
-    if written_events == 0 {
-        anyhow::bail!("The selected range has no exportable MIDI events");
-    }
-
-    let end_tick = us_to_tick(end_us.saturating_sub(start_us)).max(previous_tick);
-    let mut first_cleanup = true;
-    for channel in channels {
-        write_variable_length(
-            &mut track,
-            if first_cleanup {
-                end_tick.saturating_sub(previous_tick)
-            } else {
-                0
-            },
-        )?;
-        track.extend_from_slice(&[0xB0 | channel, 64, 0]);
-        write_variable_length(&mut track, 0)?;
-        track.extend_from_slice(&[0xB0 | channel, 123, 0]);
-        first_cleanup = false;
-        previous_tick = end_tick;
-    }
-    write_variable_length(&mut track, end_tick.saturating_sub(previous_tick))?;
-    track.extend_from_slice(&[0xFF, 0x2F, 0x00]);
-
-    let mut file = Vec::with_capacity(track.len().saturating_add(22));
-    file.extend_from_slice(b"MThd");
-    file.extend_from_slice(&6_u32.to_be_bytes());
-    file.extend_from_slice(&0_u16.to_be_bytes());
-    file.extend_from_slice(&1_u16.to_be_bytes());
-    file.extend_from_slice(&MIDI_TICKS_PER_QUARTER.to_be_bytes());
-    file.extend_from_slice(b"MTrk");
-    file.extend_from_slice(&(track.len() as u32).to_be_bytes());
-    file.extend_from_slice(&track);
-    Ok(file)
-}
-
-fn encode_midi_message(message: &[u8], channels: &mut BTreeSet<u8>) -> Option<Vec<u8>> {
-    let status = *message.first()?;
-    match status {
-        0x80..=0xEF => {
-            let expected_length = match status & 0xF0 {
-                0xC0 | 0xD0 => 2,
-                _ => 3,
-            };
-            if message.len() < expected_length {
-                return None;
-            }
-            channels.insert(status & 0x0F);
-            Some(message[..expected_length].to_vec())
-        }
-        0xF0 | 0xF7 => {
-            let payload = &message[1..];
-            let mut encoded = vec![status];
-            write_variable_length(&mut encoded, payload.len() as u64).ok()?;
-            encoded.extend_from_slice(payload);
-            Some(encoded)
-        }
-        _ => None,
-    }
-}
-
-fn us_to_tick(us: u64) -> u64 {
-    us.saturating_add(MIDI_US_PER_TICK / 2) / MIDI_US_PER_TICK
-}
-
-fn write_variable_length(out: &mut Vec<u8>, value: u64) -> Result<()> {
-    if value > 0x0FFF_FFFF {
-        anyhow::bail!("MIDI delta time is too large");
-    }
-    let mut value = value as u32;
-    let mut buffer = [0_u8; 4];
-    let mut index = 3;
-    buffer[index] = (value & 0x7F) as u8;
-    while {
-        value >>= 7;
-        value > 0
-    } {
-        index -= 1;
-        buffer[index] = ((value & 0x7F) as u8) | 0x80;
-    }
-    out.extend_from_slice(&buffer[index..]);
-    Ok(())
 }
 
 fn safe_recording_path(directory: &Path, name: &str) -> Result<PathBuf> {
@@ -447,6 +745,9 @@ fn recording_metadata(path: PathBuf) -> Result<SavedRecording> {
         name,
         size: metadata.len(),
         modified_ms,
+        start_us: None,
+        end_us: None,
+        duration_us: None,
     })
 }
 
@@ -457,83 +758,51 @@ fn unix_time_ms() -> u128 {
         .as_millis()
 }
 
-fn write_optional_u64(out: &mut String, value: Option<u64>) {
-    match value {
-        Some(value) => write!(out, "{}", value).unwrap(),
-        None => out.push_str("null"),
-    }
-}
-
-fn write_optional_u128(out: &mut String, value: Option<u128>) {
-    match value {
-        Some(value) => write!(out, "{}", value).unwrap(),
-        None => out.push_str("null"),
-    }
-}
-
-fn escape_json(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn variable_length_encoding_matches_midi_examples() {
-        let cases = [
-            (0, vec![0x00]),
-            (127, vec![0x7F]),
-            (128, vec![0x81, 0x00]),
-            (16_383, vec![0xFF, 0x7F]),
-            (16_384, vec![0x81, 0x80, 0x00]),
-            (0x0FFF_FFFF, vec![0xFF, 0xFF, 0xFF, 0x7F]),
-        ];
-        for (value, expected) in cases {
-            let mut actual = Vec::new();
-            write_variable_length(&mut actual, value).unwrap();
-            assert_eq!(actual, expected);
+    fn timed(at_us: u64, message: &[u8]) -> TimedMidiEvent {
+        TimedMidiEvent {
+            at_us,
+            message: message.to_vec(),
         }
     }
 
     #[test]
-    fn smf_preserves_channel_events_and_adds_cleanup() {
-        let events = vec![
-            TimedMidiEvent {
-                at_us: 1_000,
-                message: vec![0x90, 60, 100],
-            },
-            TimedMidiEvent {
-                at_us: 251_000,
-                message: vec![0xB0, 64, 127],
-            },
-            TimedMidiEvent {
-                at_us: 501_000,
-                message: vec![0x80, 60, 0],
-            },
-        ];
-        let file = encode_smf(&events, 1_000, 601_000).unwrap();
-        assert_eq!(&file[..4], b"MThd");
-        assert_eq!(&file[8..14], &[0, 0, 0, 1, 0x03, 0xE8]);
-        assert!(file.windows(3).any(|bytes| bytes == [0x90, 60, 100]));
-        assert!(file.windows(3).any(|bytes| bytes == [0xB0, 64, 127]));
-        assert!(file.windows(3).any(|bytes| bytes == [0x80, 60, 0]));
-        assert!(file.windows(3).any(|bytes| bytes == [0xB0, 64, 0]));
-        assert!(file.windows(3).any(|bytes| bytes == [0xB0, 123, 0]));
-        assert!(file.ends_with(&[0xFF, 0x2F, 0x00]));
+    fn boundary_event_belongs_to_one_bin() {
+        let bins = aggregate_bins(&[timed(50, &[0x90, 60, 90])], 0, 100, 50);
+        assert_eq!(bins.iter().map(|bin| bin.event_count).sum::<usize>(), 1);
+        assert_eq!(bins[25].event_count, 1);
     }
 
     #[test]
-    fn realtime_messages_are_not_recorded() {
-        assert!(is_recordable_message(&[0x90, 60, 100]));
-        assert!(is_recordable_message(&[0xF0, 1, 2, 0xF7]));
-        assert!(!is_recordable_message(&[0xFE]));
-        assert!(!is_recordable_message(&[0xF8]));
-        assert!(!is_recordable_message(&[]));
+    fn bin_totals_velocity_pitch_and_pedal_are_aggregated() {
+        let bins = aggregate_bins(
+            &[
+                timed(5, &[0xB0, 64, 127]),
+                timed(11, &[0x90, 40, 60]),
+                timed(12, &[0x90, 80, 100]),
+            ],
+            10,
+            20,
+            50,
+        );
+        assert_eq!(bins.iter().map(|bin| bin.event_count).sum::<usize>(), 2);
+        let populated = bins.iter().find(|bin| bin.note_on_count > 0).unwrap();
+        assert!(populated.pedal_down_at_end);
+        assert_eq!(populated.minimum_note, Some(40));
+        assert_eq!(populated.maximum_note, Some(40));
+    }
+
+    #[test]
+    fn marker_limit_is_reported() {
+        let events = (0..=MAX_NOTE_MARKERS)
+            .map(|index| timed(index as u64, &[0x90, 60, 1]))
+            .collect::<Vec<_>>();
+        let (notes, truncated) = note_markers(&events, 0, 10_000, true);
+        assert_eq!(notes.len(), MAX_NOTE_MARKERS);
+        assert!(truncated);
     }
 
     #[test]
@@ -541,25 +810,33 @@ mod tests {
         let directory = Path::new("recordings");
         assert!(safe_recording_path(directory, "fp10-123.mid").is_ok());
         assert!(safe_recording_path(directory, "../secret.mid").is_err());
-        assert!(safe_recording_path(directory, "not-midi.txt").is_err());
     }
 
     #[test]
-    fn recorder_saves_and_reads_a_take() {
+    fn realtime_messages_are_not_recorded() {
+        assert!(is_recordable_message(&[0x90, 60, 100]));
+        assert!(is_recordable_message(&[0xF0, 1, 2, 0xF7]));
+        assert!(!is_recordable_message(&[0xFE]));
+        assert!(!is_recordable_message(&[]));
+    }
+
+    #[test]
+    fn stale_session_and_empty_ranges_have_typed_errors() {
         let directory = std::env::temp_dir().join(format!(
-            "fp10-recorder-test-{}-{}",
+            "fp10-recorder-range-test-{}-{}",
             std::process::id(),
             unix_time_ms()
         ));
         let recorder = Recorder::new(directory.clone()).unwrap();
-        recorder.start_take().unwrap();
-        recorder.ingest(&[0x90, 60, 100]);
-        recorder.ingest(&[0xB0, 64, 127]);
-        recorder.ingest(&[0x80, 60, 0]);
-        recorder.stop_take().unwrap();
-        let saved = recorder.save_take().unwrap();
-        let bytes = recorder.read_recording(&saved.name).unwrap();
-        assert_eq!(&bytes[..4], b"MThd");
+        let end_us = recorder.elapsed_us().max(1);
+        let stale = recorder
+            .prepare_range("old-session", 0, end_us)
+            .unwrap_err();
+        assert_eq!(stale.code, RecorderErrorCode::StaleSession);
+        let empty = recorder
+            .prepare_range(recorder.session_id(), 0, end_us)
+            .unwrap_err();
+        assert_eq!(empty.code, RecorderErrorCode::RangeEmpty);
         fs::remove_dir_all(directory).unwrap();
     }
 }

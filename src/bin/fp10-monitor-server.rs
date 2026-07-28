@@ -17,11 +17,16 @@ use midir::{Ignore, MidiInput, MidiInputPort};
 
 #[path = "../metronome.rs"]
 mod metronome;
+#[path = "../midi_clip.rs"]
+mod midi_clip;
+#[path = "../midi_preview.rs"]
+mod midi_preview;
 #[path = "../recorder.rs"]
 mod recorder;
 
 use metronome::{Metronome, MetronomePatch};
-use recorder::Recorder;
+use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
+use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
 #[derive(Debug, Parser)]
 #[command(name = "fp10-monitor-server")]
@@ -237,6 +242,8 @@ fn main() -> Result<()> {
         .map(Ok)
         .unwrap_or_else(Recorder::default_directory)?;
     let recorder = Arc::new(Recorder::new(recordings_dir)?);
+    let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
+    let recorder_control = Arc::new(Mutex::new(()));
     let midi_state = Arc::clone(&state);
     let midi_recorder = Arc::clone(&recorder);
 
@@ -271,8 +278,17 @@ fn main() -> Result<()> {
                 let state = Arc::clone(&state);
                 let metronome = Arc::clone(&metronome);
                 let recorder = Arc::clone(&recorder);
+                let preview = Arc::clone(&preview);
+                let recorder_control = Arc::clone(&recorder_control);
                 thread::spawn(move || {
-                    if let Err(error) = handle_client(stream, state, metronome, recorder) {
+                    if let Err(error) = handle_client(
+                        stream,
+                        state,
+                        metronome,
+                        recorder,
+                        preview,
+                        recorder_control,
+                    ) {
                         eprintln!("HTTP error: {}", error);
                     }
                 });
@@ -344,6 +360,8 @@ fn handle_client(
     state: Arc<Mutex<MonitorState>>,
     metronome: Arc<Metronome>,
     recorder: Arc<Recorder>,
+    preview: Arc<MidiPreview>,
+    recorder_control: Arc<Mutex<()>>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -351,12 +369,15 @@ fn handle_client(
     let mut buffer = [0_u8; 2048];
     let bytes_read = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-    let target = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
+    let request_line = request.lines().next().unwrap_or("");
+    let method = request_line.split_whitespace().next().unwrap_or("GET");
+    let target = request_line.split_whitespace().nth(1).unwrap_or("/");
     let (path, query) = split_target(target);
+    let has_control_header = request.lines().skip(1).any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("X-FP10-Control") && value.trim() == "1"
+        })
+    });
 
     match path {
         "/" | "/index.html" => respond(
@@ -419,7 +440,27 @@ fn handle_client(
             )
         }
         "/recorder" => {
-            let result = match query_value(query, "action").as_deref() {
+            let action = query_value(query, "action");
+            let _control = action
+                .as_ref()
+                .map(|_| {
+                    recorder_control
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("recorder control lock poisoned"))
+                })
+                .transpose()?;
+            if action.as_deref() == Some("start") {
+                if let Some(preview_id) = preview.snapshot().preview_id {
+                    let _ = preview.stop(preview_id);
+                    for _ in 0..25 {
+                        if !recorder.capture_suspended() {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                }
+            }
+            let result = match action.as_deref() {
                 Some("start") => recorder.start_take(),
                 Some("stop") => recorder.stop_take(),
                 Some("save-take") => recorder.save_take().map(|_| ()),
@@ -442,6 +483,152 @@ fn handle_client(
                 "application/json; charset=utf-8",
                 &body,
             )
+        }
+        "/recorder/timeline" => {
+            if method != "GET" {
+                respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "Timeline requests must use GET",
+                    None,
+                )
+            } else if let Some(session_id) = query_value(query, "sessionId") {
+                if session_id != recorder.session_id() {
+                    respond_api_error(
+                        &mut stream,
+                        "409 Conflict",
+                        "stale_session",
+                        "Recorder session changed; refresh the selection",
+                        None,
+                    )
+                } else {
+                    respond_timeline(&mut stream, &recorder, query)
+                }
+            } else {
+                respond_timeline(&mut stream, &recorder, query)
+            }
+        }
+        "/recorder/save-range" => {
+            if method != "POST" {
+                respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "Save range requests must use POST",
+                    None,
+                )
+            } else if !has_control_header {
+                respond_api_error(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid_parameter",
+                    "Missing X-FP10-Control: 1 header",
+                    None,
+                )
+            } else {
+                let result =
+                    required_range_parameters(query).and_then(|(session_id, start_us, end_us)| {
+                        recorder.save_range(&session_id, start_us, end_us)
+                    });
+                match result {
+                    Ok(result) => {
+                        let body = serde_json::json!({
+                            "ok": true,
+                            "recording": result.recording,
+                            "warnings": result.warnings,
+                        })
+                        .to_string();
+                        respond(
+                            &mut stream,
+                            "200 OK",
+                            "application/json; charset=utf-8",
+                            &body,
+                        )
+                    }
+                    Err(error) => respond_recorder_error(&mut stream, &error),
+                }
+            }
+        }
+        "/recorder/preview" => {
+            if method == "GET" {
+                let body = serde_json::json!({
+                    "ok": true,
+                    "outputs": preview.outputs(),
+                    "preview": preview.snapshot(),
+                })
+                .to_string();
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "Preview mutations must use POST",
+                    None,
+                )
+            } else if !has_control_header {
+                respond_api_error(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid_parameter",
+                    "Missing X-FP10-Control: 1 header",
+                    None,
+                )
+            } else {
+                let _control = recorder_control
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("recorder control lock poisoned"))?;
+                match query_value(query, "action").as_deref() {
+                    Some("play") => {
+                        if recorder.take_is_recording() {
+                            let error = RecorderError::new(
+                                RecorderErrorCode::TakeInProgress,
+                                "Stop the active Take before previewing",
+                            );
+                            respond_recorder_error(&mut stream, &error)
+                        } else {
+                            handle_preview_play(&mut stream, query, &recorder, &preview)
+                        }
+                    }
+                    Some("stop") => {
+                        let result = required_u64(query, "previewId")
+                            .map_err(|message| PreviewError {
+                                code: PreviewErrorCode::PreviewReplaced,
+                                message,
+                            })
+                            .and_then(|preview_id| preview.stop(preview_id));
+                        match result {
+                            Ok(()) => {
+                                let body = serde_json::json!({
+                                    "ok": true,
+                                    "preview": preview.snapshot()
+                                })
+                                .to_string();
+                                respond(
+                                    &mut stream,
+                                    "200 OK",
+                                    "application/json; charset=utf-8",
+                                    &body,
+                                )
+                            }
+                            Err(error) => respond_preview_error(&mut stream, &error),
+                        }
+                    }
+                    _ => respond_api_error(
+                        &mut stream,
+                        "400 Bad Request",
+                        "invalid_parameter",
+                        "action must be play or stop",
+                        None,
+                    ),
+                }
+            }
         }
         "/recordings/download" => {
             let result = query_value(query, "name")
@@ -478,6 +665,199 @@ fn query_value(query: &str, desired_key: &str) -> Option<String> {
         let (key, value) = pair.split_once('=')?;
         (key == desired_key).then(|| percent_decode(value))
     })
+}
+
+fn optional_u64(query: &str, key: &str) -> std::result::Result<Option<u64>, String> {
+    query_value(query, key)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("{} must be an unsigned integer", key))
+        })
+        .transpose()
+}
+
+fn required_u64(query: &str, key: &str) -> std::result::Result<u64, String> {
+    optional_u64(query, key)?.ok_or_else(|| format!("Missing {}", key))
+}
+
+fn required_range_parameters(query: &str) -> recorder::RecorderResult<(String, u64, u64)> {
+    let session_id = query_value(query, "sessionId").ok_or_else(|| {
+        RecorderError::new(RecorderErrorCode::InvalidParameter, "Missing sessionId")
+    })?;
+    let start_us = required_u64(query, "startUs")
+        .map_err(|message| RecorderError::new(RecorderErrorCode::InvalidParameter, message))?;
+    let end_us = required_u64(query, "endUs")
+        .map_err(|message| RecorderError::new(RecorderErrorCode::InvalidParameter, message))?;
+    Ok((session_id, start_us, end_us))
+}
+
+fn respond_timeline(stream: &mut TcpStream, recorder: &Recorder, query: &str) -> Result<()> {
+    let parsed = (|| {
+        let start_us = optional_u64(query, "startUs")?;
+        let end_us = optional_u64(query, "endUs")?;
+        let bins = query_value(query, "bins")
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|_| "bins must be an unsigned integer".to_string())
+            })
+            .transpose()?;
+        let notes = match query_value(query, "notes").as_deref() {
+            None | Some("0") | Some("false") => false,
+            Some("1") | Some("true") => true,
+            Some(_) => return Err("notes must be 0 or 1".to_string()),
+        };
+        Ok(TimelineRequest {
+            start_us,
+            end_us,
+            bins,
+            notes,
+        })
+    })();
+    match parsed {
+        Ok(request) => match recorder.timeline(request) {
+            Ok(snapshot) => {
+                let body = serde_json::to_string(&snapshot)?;
+                respond(stream, "200 OK", "application/json; charset=utf-8", &body)
+            }
+            Err(error) => respond_recorder_error(stream, &error),
+        },
+        Err(message) => respond_api_error(
+            stream,
+            "400 Bad Request",
+            "invalid_parameter",
+            &message,
+            None,
+        ),
+    }
+}
+
+fn handle_preview_play(
+    stream: &mut TcpStream,
+    query: &str,
+    recorder: &Recorder,
+    preview: &MidiPreview,
+) -> Result<()> {
+    let (session_id, start_us, end_us) = match required_range_parameters(query) {
+        Ok(range) => range,
+        Err(error) => return respond_recorder_error(stream, &error),
+    };
+    let position_us = match optional_u64(query, "positionUs") {
+        Ok(value) => value.unwrap_or(start_us),
+        Err(message) => {
+            return respond_api_error(
+                stream,
+                "400 Bad Request",
+                "invalid_parameter",
+                &message,
+                None,
+            )
+        }
+    };
+    if position_us < start_us || position_us >= end_us {
+        return respond_api_error(
+            stream,
+            "400 Bad Request",
+            "invalid_range",
+            "positionUs must be inside [startUs, endUs)",
+            None,
+        );
+    }
+    let output_name = query_value(query, "outputName");
+    if output_name.as_ref().is_some_and(|name| name.len() > 128) {
+        return respond_api_error(
+            stream,
+            "400 Bad Request",
+            "invalid_parameter",
+            "outputName is too long",
+            None,
+        );
+    }
+    if let Some(name) = output_name.as_ref() {
+        let wanted = name.to_lowercase();
+        if !preview
+            .outputs()
+            .iter()
+            .any(|candidate| candidate.to_lowercase().contains(&wanted))
+        {
+            return respond_api_error(
+                stream,
+                "404 Not Found",
+                "output_not_found",
+                "The selected MIDI output was not found",
+                None,
+            );
+        }
+    }
+    let clip = match recorder.prepare_range(&session_id, position_us, end_us) {
+        Ok(clip) => clip,
+        Err(error) => return respond_recorder_error(stream, &error),
+    };
+    match preview.play(session_id, clip, position_us, output_name) {
+        Ok(preview_id) => {
+            let body = serde_json::json!({
+                "ok": true,
+                "previewId": preview_id,
+                "preview": preview.snapshot(),
+            })
+            .to_string();
+            respond(stream, "200 OK", "application/json; charset=utf-8", &body)
+        }
+        Err(error) => respond_preview_error(stream, &error),
+    }
+}
+
+fn respond_recorder_error(stream: &mut TcpStream, error: &RecorderError) -> Result<()> {
+    let status = match error.code {
+        RecorderErrorCode::InvalidParameter | RecorderErrorCode::InvalidRange => "400 Bad Request",
+        RecorderErrorCode::StaleSession
+        | RecorderErrorCode::RangeExpired
+        | RecorderErrorCode::RangeEmpty
+        | RecorderErrorCode::TakeInProgress
+        | RecorderErrorCode::StateLockFailed => "409 Conflict",
+        RecorderErrorCode::InternalError => "500 Internal Server Error",
+    };
+    respond_api_error(
+        stream,
+        status,
+        error.code.as_str(),
+        &error.message,
+        error.available_start_us,
+    )
+}
+
+fn respond_preview_error(stream: &mut TcpStream, error: &PreviewError) -> Result<()> {
+    let status = match error.code {
+        PreviewErrorCode::OutputNotFound => "404 Not Found",
+        PreviewErrorCode::PreviewReplaced => "409 Conflict",
+        PreviewErrorCode::OutputConnectFailed | PreviewErrorCode::PreviewFailed => {
+            "500 Internal Server Error"
+        }
+    };
+    respond_api_error(stream, status, error.code.as_str(), &error.message, None)
+}
+
+fn respond_api_error(
+    stream: &mut TcpStream,
+    status: &str,
+    code: &str,
+    message: &str,
+    available_start_us: Option<u64>,
+) -> Result<()> {
+    let details = available_start_us
+        .map(|value| serde_json::json!({"availableStartUs": value}))
+        .unwrap_or_else(|| serde_json::json!({}));
+    let body = serde_json::json!({
+        "ok": false,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details,
+        }
+    })
+    .to_string();
+    respond(stream, status, "application/json; charset=utf-8", &body)
 }
 
 fn parse_metronome_patch(query: &str) -> MetronomePatch {
@@ -675,7 +1055,7 @@ fn parse_after(line: &str, marker: &str) -> Option<u8> {
 fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         status,
         content_type,
         body.as_bytes().len(),
@@ -687,7 +1067,7 @@ fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str)
 fn respond_download(stream: &mut TcpStream, name: &str, body: &[u8]) -> Result<()> {
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: audio/midi\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: audio/midi\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         name,
         body.len()
     )?;

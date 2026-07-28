@@ -21,6 +21,35 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(28px,4vw,42px); line-height:1; } h2 {
 .recorder-actions button:disabled { cursor:not-allowed; opacity:.42; }
 .recorder-message { min-height:18px; margin-top:8px; color:var(--red); font-size:12px; font-weight:750; }
 .recorder-message.ok { color:var(--accent); }
+.clip-editor { margin-top:4px; border-top:1px solid var(--line); }
+.clip-editor > summary { min-height:38px; display:flex; align-items:center; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
+.clip-editor-body { display:grid; gap:10px; padding:3px 0 8px; }
+.clip-toolbar,.clip-adjust,.clip-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.clip-presets,.clip-focus,.clip-nudges { display:flex; gap:5px; }
+.clip-toolbar button,.clip-adjust button,.clip-actions button { min-height:36px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.clip-toolbar button.active,.clip-focus button.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.clip-rail { position:relative; height:112px; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#edf2ee; touch-action:none; user-select:none; }
+.clip-bins { position:absolute; inset:8px 0; display:flex; align-items:flex-end; gap:1px; }
+.clip-bin { flex:1 1 0; min-width:1px; border-radius:2px 2px 0 0; background:var(--accent); opacity:.75; }
+.clip-outside { position:absolute; top:0; bottom:0; background:rgba(24,32,29,.48); pointer-events:none; z-index:2; }
+.clip-outside-start { left:0; }
+.clip-outside-end { right:0; }
+.clip-selection { position:absolute; top:0; bottom:0; min-width:2px; border-top:2px solid rgba(255,255,255,.9); border-bottom:2px solid rgba(255,255,255,.9); cursor:grab; z-index:3; }
+.clip-selection:active { cursor:grabbing; }
+.clip-handle { position:absolute; top:0; width:44px; height:100%; transform:translateX(-50%); border:0; background:transparent; padding:0; cursor:ew-resize; touch-action:none; z-index:5; }
+.clip-handle::after { content:""; position:absolute; top:12px; bottom:12px; left:19px; width:6px; border-radius:4px; background:#fff; box-shadow:0 0 0 2px var(--accent); }
+.clip-playhead { display:none; position:absolute; top:0; bottom:0; width:2px; background:var(--red); box-shadow:0 0 0 1px rgba(255,255,255,.7); pointer-events:none; z-index:6; }
+.clip-times { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+.clip-times div { padding:7px 8px; border:1px solid var(--line); border-radius:7px; background:#fbfcfa; }
+.clip-times span { display:block; color:var(--muted); font-size:10px; font-weight:750; }
+.clip-times strong { display:block; margin-top:2px; font-size:14px; }
+.clip-actions { justify-content:flex-start; }
+.clip-actions button { min-width:92px; border-color:var(--accent); }
+.clip-actions button:first-child,.clip-actions button:last-child { background:var(--accent); color:#fff; }
+.clip-actions button:disabled,.clip-adjust button:disabled { cursor:not-allowed; opacity:.42; }
+.clip-status { min-height:18px; color:var(--muted); font-size:12px; font-weight:750; }
+.clip-status.error { color:var(--red); }
+.clip-status.ok { color:var(--accent); }
 .recorder-files summary { min-height:30px; display:flex; align-items:center; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
 .recorder-file-list { display:grid; gap:6px; padding-top:4px; }
 .recorder-file { display:grid; grid-template-columns:minmax(120px,1fr) auto auto; gap:10px; align-items:center; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fbfcfa; font-size:12px; }
@@ -123,6 +152,18 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .recorder-actions button { min-height:40px; }
   .recorder-actions button:last-child { grid-column:1/-1; }
   .recorder-message { margin-top:5px; }
+  .clip-times { grid-template-columns:repeat(3,1fr); }
+  .clip-toolbar { align-items:stretch; }
+  .clip-presets { display:grid; grid-template-columns:repeat(4,1fr); flex:1 0 100%; }
+  .clip-presets button { padding:0 5px; }
+  #clipOutput { width:100%; min-height:36px; }
+  .clip-adjust { display:grid; grid-template-columns:1fr; }
+  .clip-focus,.clip-nudges { display:grid; grid-template-columns:repeat(2,1fr); }
+  .clip-nudges { grid-template-columns:repeat(4,1fr); }
+  .clip-adjust button { padding:0 4px; }
+  .clip-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .clip-actions button { min-height:42px; }
+  .clip-actions button:last-child { grid-column:1/-1; }
   .recorder-file { grid-template-columns:minmax(100px,1fr) auto; }
   .recorder-file small { display:none; }
   .grid,.timeline,.lower { display:none; }

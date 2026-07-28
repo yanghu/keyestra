@@ -584,6 +584,309 @@ async function recorderAction(button){
 document.querySelectorAll("[data-recorder-action]").forEach(button=>button.addEventListener("click",()=>recorderAction(button)));
 fetchRecorder();
 setInterval(fetchRecorder,1000);
+const clipState={
+  sessionId:null, availableStartUs:0, availableEndUs:0, viewStartUs:0, viewEndUs:0,
+  startUs:null, endUs:null, focus:"start", preset:30000000, timeline:null,
+  previewId:null, preview:null, drag:null, loading:false
+};
+const clipMinimumUs=100000;
+async function recorderApi(url, options={}){
+  const response=await fetch(url,{cache:"no-store",...options});
+  let data={};
+  try{ data=await response.json(); }catch(e){}
+  if(!response.ok || data.ok===false){
+    const error=new Error(data.error?.message || `HTTP ${response.status}`);
+    error.code=data.error?.code;
+    error.details=data.error?.details || {};
+    throw error;
+  }
+  return data;
+}
+function formatClipTime(us){
+  const milliseconds=Math.max(0,Math.round(Number(us || 0)/1000));
+  const minutes=Math.floor(milliseconds/60000);
+  const seconds=Math.floor(milliseconds%60000/1000);
+  const millis=milliseconds%1000;
+  return `${minutes}:${String(seconds).padStart(2,"0")}.${String(millis).padStart(3,"0")}`;
+}
+function setClipStatus(message,className=""){
+  $("clipStatus").textContent=message;
+  $("clipStatus").className=`clip-status ${className}`.trim();
+}
+function clipPercent(us){
+  const duration=Math.max(1,clipState.viewEndUs-clipState.viewStartUs);
+  return Math.max(0,Math.min(100,(us-clipState.viewStartUs)/duration*100));
+}
+function renderClipSelection(){
+  if(clipState.startUs==null || clipState.endUs==null) return;
+  const hasRange=clipState.endUs-clipState.startUs>=clipMinimumUs;
+  const start=clipPercent(clipState.startUs);
+  const end=clipPercent(clipState.endUs);
+  $("clipOutsideStart").style.width=`${start}%`;
+  $("clipOutsideEnd").style.width=`${100-end}%`;
+  $("clipSelection").style.left=`${start}%`;
+  $("clipSelection").style.width=`${Math.max(0,end-start)}%`;
+  $("clipStartHandle").style.left=`clamp(22px, ${start}%, calc(100% - 22px))`;
+  $("clipEndHandle").style.left=`clamp(22px, ${end}%, calc(100% - 22px))`;
+  $("clipStartTime").textContent=formatClipTime(clipState.startUs);
+  $("clipEndTime").textContent=formatClipTime(clipState.endUs);
+  $("clipDuration").textContent=formatClipTime(clipState.endUs-clipState.startUs);
+  for(const [element,value,label] of [
+    [$("clipStartHandle"),clipState.startUs,"片段开始"],
+    [$("clipEndHandle"),clipState.endUs,"片段结束"]
+  ]){
+    element.setAttribute("aria-valuemin",String(clipState.availableStartUs));
+    element.setAttribute("aria-valuemax",String(clipState.availableEndUs));
+    element.setAttribute("aria-valuenow",String(value));
+    element.setAttribute("aria-valuetext",`${label} ${formatClipTime(value)}`);
+  }
+  document.querySelectorAll("[data-clip-focus]").forEach(button=>button.classList.toggle("active",button.dataset.clipFocus===clipState.focus));
+  $("clipPlay").disabled=!hasRange;
+  $("clipSave").disabled=!hasRange;
+  document.querySelectorAll("[data-clip-nudge]").forEach(button=>button.disabled=!hasRange);
+}
+function renderClipBins(timeline){
+  clipState.timeline=timeline;
+  const maximum=Math.max(1,...timeline.bins.map(bin=>Number(bin.noteOnCount||0)));
+  $("clipBins").innerHTML=timeline.bins.map(bin=>{
+    const density=Number(bin.noteOnCount||0)/maximum;
+    const velocity=Number(bin.velocityMaximum||0)/127;
+    const height=Math.max(3,Math.round((density*.72+velocity*.28)*92));
+    const opacity=.38+Math.min(.58,density*.42+velocity*.22);
+    return `<span class="clip-bin" style="height:${height}%;opacity:${opacity}"></span>`;
+  }).join("");
+  renderClipSelection();
+}
+function selectedClipParams(){
+  return new URLSearchParams({
+    sessionId:clipState.sessionId,
+    startUs:String(Math.round(clipState.startUs)),
+    endUs:String(Math.round(clipState.endUs))
+  });
+}
+async function loadClipTimeline({reset=false,message=""}={}){
+  if(clipState.loading) return;
+  clipState.loading=true;
+  try{
+    const params=new URLSearchParams({bins:"600",notes:"1"});
+    if(clipState.sessionId && !reset){
+      params.set("sessionId",clipState.sessionId);
+      params.set("startUs",String(Math.round(clipState.viewStartUs)));
+      params.set("endUs",String(Math.round(clipState.viewEndUs)));
+    }
+    const timeline=await recorderApi(`/recorder/timeline?${params}`);
+    const changed=clipState.sessionId && clipState.sessionId!==timeline.sessionId;
+    clipState.sessionId=timeline.sessionId;
+    clipState.availableStartUs=timeline.buffer.availableStartUs;
+    clipState.availableEndUs=timeline.buffer.availableEndUs;
+    clipState.viewStartUs=timeline.range.startUs;
+    clipState.viewEndUs=timeline.range.endUs;
+    if(reset || changed || clipState.startUs==null){
+      const take=timeline.take && !timeline.take.recording ? timeline.take : null;
+      clipState.startUs=take?.startUs ?? timeline.range.startUs;
+      clipState.endUs=take?.endUs ?? timeline.range.endUs;
+    }
+    if(clipState.availableEndUs<=clipState.availableStartUs){
+      clipState.startUs=clipState.availableStartUs;
+      clipState.endUs=clipState.availableEndUs;
+      renderClipBins(timeline);
+      $("clipEventCount").textContent="0";
+      $("clipNoteCount").textContent="0";
+      setClipStatus("等待 MIDI 输入后即可选择片段。");
+      return;
+    }
+    let clipped=false;
+    if(clipState.startUs<clipState.availableStartUs){
+      clipState.startUs=clipState.availableStartUs;
+      clipped=true;
+    }
+    clipState.endUs=Math.min(clipState.endUs,clipState.availableEndUs);
+    if(clipState.endUs-clipState.startUs<clipMinimumUs){
+      clipState.endUs=Math.min(clipState.availableEndUs,clipState.startUs+clipMinimumUs);
+    }
+    renderClipBins(timeline);
+    await refreshClipStats();
+    if(changed) setClipStatus("Monitor 已重启，旧选择已清除。","error");
+    else if(clipped) setClipStatus("最旧的片段已离开滚动缓存，开始位置已调整。","error");
+    else if(message) setClipStatus(message);
+    else if(!timeline.stateComplete) setClipStatus("缓存左边界之前的 MIDI 状态不完整；保存和试听会标记警告。");
+    else setClipStatus("拖动手柄或所选区域来精确选择片段。");
+  }catch(error){
+    if(error.code==="stale_session"){
+      clipState.sessionId=null;
+      clipState.startUs=null;
+      clipState.endUs=null;
+      setClipStatus("Monitor 已重启，正在重新载入。","error");
+      setTimeout(()=>loadClipTimeline({reset:true}),250);
+    }else setClipStatus(error.message || "无法载入时间轴","error");
+  }finally{ clipState.loading=false; }
+}
+async function refreshClipStats(){
+  if(!clipState.sessionId || clipState.startUs==null) return;
+  try{
+    const params=selectedClipParams();
+    params.set("bins","50");
+    const data=await recorderApi(`/recorder/timeline?${params}`);
+    $("clipEventCount").textContent=data.bins.reduce((sum,bin)=>sum+Number(bin.eventCount||0),0).toLocaleString();
+    $("clipNoteCount").textContent=data.bins.reduce((sum,bin)=>sum+Number(bin.noteOnCount||0),0).toLocaleString();
+  }catch(error){
+    $("clipEventCount").textContent="--";
+    $("clipNoteCount").textContent="--";
+  }
+}
+async function stopClipPreview(silent=false){
+  if(!clipState.previewId) return;
+  const previewId=clipState.previewId;
+  try{
+    await recorderApi(`/recorder/preview?action=stop&previewId=${previewId}`,{
+      method:"POST",headers:{"X-FP10-Control":"1"}
+    });
+    if(!silent) setClipStatus("试听已停止。");
+  }catch(error){
+    if(error.code!=="preview_replaced" && !silent) setClipStatus(error.message,"error");
+  }
+  clipState.previewId=null;
+  $("clipPlayhead").style.display="none";
+}
+function constrainClipSelection(start,end){
+  const availableStart=Math.max(clipState.availableStartUs,clipState.viewStartUs);
+  const availableEnd=Math.min(clipState.availableEndUs,clipState.viewEndUs);
+  start=Math.max(availableStart,Math.min(start,availableEnd-clipMinimumUs));
+  end=Math.min(availableEnd,Math.max(end,start+clipMinimumUs));
+  return [Math.round(start),Math.round(end)];
+}
+function beginClipDrag(event,type){
+  if(clipState.startUs==null) return;
+  stopClipPreview(true);
+  event.currentTarget.setPointerCapture(event.pointerId);
+  clipState.drag={type,pointerId:event.pointerId,x:event.clientX,startUs:clipState.startUs,endUs:clipState.endUs};
+  if(type==="start" || type==="end") clipState.focus=type;
+  renderClipSelection();
+  event.preventDefault();
+}
+function moveClipDrag(event){
+  const drag=clipState.drag;
+  if(!drag || drag.pointerId!==event.pointerId) return;
+  const width=Math.max(1,$("clipRail").getBoundingClientRect().width);
+  const delta=(event.clientX-drag.x)/width*(clipState.viewEndUs-clipState.viewStartUs);
+  let start=drag.startUs,end=drag.endUs;
+  if(drag.type==="start") start=Math.min(end-clipMinimumUs,start+delta);
+  else if(drag.type==="end") end=Math.max(start+clipMinimumUs,end+delta);
+  else {
+    const duration=end-start;
+    start+=delta; end+=delta;
+    if(start<clipState.viewStartUs){ start=clipState.viewStartUs; end=start+duration; }
+    if(end>clipState.viewEndUs){ end=clipState.viewEndUs; start=end-duration; }
+  }
+  [clipState.startUs,clipState.endUs]=constrainClipSelection(start,end);
+  renderClipSelection();
+}
+function endClipDrag(event){
+  if(!clipState.drag || clipState.drag.pointerId!==event.pointerId) return;
+  clipState.drag=null;
+  refreshClipStats();
+}
+$("clipStartHandle").addEventListener("pointerdown",event=>beginClipDrag(event,"start"));
+$("clipEndHandle").addEventListener("pointerdown",event=>beginClipDrag(event,"end"));
+$("clipSelection").addEventListener("pointerdown",event=>beginClipDrag(event,"region"));
+[$("clipStartHandle"),$("clipEndHandle"),$("clipSelection")].forEach(element=>{
+  element.addEventListener("pointermove",moveClipDrag);
+  element.addEventListener("pointerup",endClipDrag);
+  element.addEventListener("pointercancel",endClipDrag);
+});
+function nudgeClipBoundary(delta){
+  if(clipState.startUs==null) return;
+  stopClipPreview(true);
+  let start=clipState.startUs,end=clipState.endUs;
+  if(clipState.focus==="start") start+=delta; else end+=delta;
+  [clipState.startUs,clipState.endUs]=constrainClipSelection(start,end);
+  renderClipSelection();
+  refreshClipStats();
+}
+[$("clipStartHandle"),$("clipEndHandle")].forEach((handle,index)=>handle.addEventListener("keydown",event=>{
+  if(!["ArrowLeft","ArrowRight"].includes(event.key)) return;
+  clipState.focus=index===0?"start":"end";
+  nudgeClipBoundary((event.key==="ArrowLeft"?-1:1)*(event.shiftKey?1000000:100000));
+  event.preventDefault();
+}));
+document.querySelectorAll("[data-clip-focus]").forEach(button=>button.addEventListener("click",()=>{
+  clipState.focus=button.dataset.clipFocus;
+  renderClipSelection();
+  $(clipState.focus==="start"?"clipStartHandle":"clipEndHandle").focus();
+}));
+document.querySelectorAll("[data-clip-nudge]").forEach(button=>button.addEventListener("click",()=>nudgeClipBoundary(Number(button.dataset.clipNudge))));
+document.querySelectorAll("[data-clip-view]").forEach(button=>button.addEventListener("click",async()=>{
+  if(!clipState.sessionId) return;
+  stopClipPreview(true);
+  const value=button.dataset.clipView;
+  const duration=value==="all" ? clipState.availableEndUs-clipState.availableStartUs : Number(value);
+  clipState.preset=value;
+  clipState.viewEndUs=clipState.availableEndUs;
+  clipState.viewStartUs=Math.max(clipState.availableStartUs,clipState.viewEndUs-duration);
+  document.querySelectorAll("[data-clip-view]").forEach(item=>item.classList.toggle("active",item===button));
+  await loadClipTimeline({message:"时间轴范围已更新。"});
+}));
+$("clipPlay").addEventListener("click",async()=>{
+  if(!clipState.sessionId) return;
+  await stopClipPreview(true);
+  setClipStatus("正在连接电脑的 MIDI 输出…");
+  const params=selectedClipParams();
+  params.set("action","play");
+  params.set("outputName",$("clipOutput").value);
+  try{
+    const data=await recorderApi(`/recorder/preview?${params}`,{
+      method:"POST",headers:{"X-FP10-Control":"1"}
+    });
+    clipState.previewId=data.previewId;
+    setClipStatus("试听中；滚动录音捕获已暂停。","ok");
+  }catch(error){ setClipStatus(error.message || "试听失败","error"); }
+});
+$("clipStop").addEventListener("click",()=>stopClipPreview());
+$("clipSave").addEventListener("click",async()=>{
+  if(!clipState.sessionId) return;
+  await stopClipPreview(true);
+  setClipStatus("正在保存精确片段…");
+  try{
+    const result=await recorderApi(`/recorder/save-range?${selectedClipParams()}`,{
+      method:"POST",headers:{"X-FP10-Control":"1"}
+    });
+    const warnings=result.warnings?.length ? `（${result.warnings.join("、")}）` : "";
+    setClipStatus(`已保存 ${result.recording.name}${warnings}`,"ok");
+    fetchRecorder();
+  }catch(error){
+    if(error.code==="range_expired") loadClipTimeline();
+    setClipStatus(error.message || "保存失败","error");
+  }
+});
+async function pollClipPreview(){
+  if(!$("clipEditor").open) return;
+  try{
+    const data=await recorderApi("/recorder/preview");
+    const preview=data.preview;
+    clipState.preview=preview;
+    if(data.outputs?.length){
+      const selected=$("clipOutput").value;
+      $("clipOutput").innerHTML=data.outputs.map(name=>`<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join("");
+      $("clipOutput").value=data.outputs.includes(selected) ? selected : (data.outputs.find(name=>name.toLowerCase().includes("fp10 mapped")) || data.outputs[0]);
+    }
+    if(clipState.previewId!=null && preview.previewId===clipState.previewId && preview.state==="playing" && preview.positionUs!=null){
+      $("clipPlayhead").style.display="block";
+      $("clipPlayhead").style.left=`${clipPercent(preview.positionUs)}%`;
+      setClipStatus("试听中；滚动录音捕获已暂停。","ok");
+    }else if(clipState.previewId!=null && preview.previewId===clipState.previewId && preview.state!=="playing"){
+      clipState.previewId=null;
+      $("clipPlayhead").style.display="none";
+      if(preview.error) setClipStatus(preview.error,"error");
+      else setClipStatus("试听完成，滚动录音捕获已恢复。","ok");
+    }
+  }catch(error){}
+}
+$("clipEditor").addEventListener("toggle",()=>{
+  if($("clipEditor").open) loadClipTimeline({reset:!clipState.sessionId});
+  else stopClipPreview(true);
+});
+setInterval(()=>{ if($("clipEditor").open) loadClipTimeline(); },2000);
+setInterval(pollClipPreview,500);
 restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
 let pollingTimer = null;
