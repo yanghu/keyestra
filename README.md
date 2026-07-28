@@ -201,6 +201,8 @@ Planned recorder follow-ups:
 - Preview a saved or buffered range from the phone.
 - Show a compact performance timeline and drag exact start/end handles before
   saving.
+- The implementation design is in
+  [`docs/RECORDER_PREVIEW_DESIGN.md`](docs/RECORDER_PREVIEW_DESIGN.md).
 - Add a crash-recoverable rolling journal for unsaved performances.
 - Replay through a selectable MIDI output and stop safely with sustain/all
   notes off.
