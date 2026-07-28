@@ -511,6 +511,79 @@ document.querySelectorAll(".metronome-volume").forEach(input=>input.addEventList
 document.querySelectorAll(".metronome-output").forEach(select=>select.addEventListener("change",()=>updateMetronome({outputDevice:select.value})));
 fetchMetronome();
 connectMetronomeEvents();
+let recorderState = null;
+let recorderBusy = false;
+function formatRecorderDuration(milliseconds){
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds % 3600 / 60);
+  const seconds = totalSeconds % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}` : `${minutes}:${String(seconds).padStart(2,"0")}`;
+}
+function formatFileSize(bytes){
+  const value=Number(bytes || 0);
+  return value < 1024 ? `${value} B` : value < 1024*1024 ? `${(value/1024).toFixed(1)} KB` : `${(value/1024/1024).toFixed(1)} MB`;
+}
+function renderRecorder(recorder){
+  recorderState = recorder;
+  if(recorder.error){
+    $("recorderMessage").textContent=recorder.error;
+    $("recorderMessage").classList.remove("ok");
+    return;
+  }
+  $("recorderSummary").textContent = recorder.recording
+    ? "正在标记 Take；60 分钟滚动缓存仍在运行"
+    : `随时可保存最近的演奏 · 最多 ${recorder.bufferLimitMinutes || 60} 分钟`;
+  $("recorderDuration").textContent=formatRecorderDuration(recorder.bufferedMs);
+  $("recorderEvents").textContent=Number(recorder.eventCount || 0).toLocaleString();
+  $("recorderTakeDuration").textContent=recorder.takeAvailable ? formatRecorderDuration(recorder.takeDurationMs) : "--";
+  document.querySelectorAll("[data-recorder-action]").forEach(button=>{
+    const action=button.dataset.recorderAction;
+    button.disabled = recorderBusy
+      || (action==="start" && recorder.recording)
+      || (action==="stop" && !recorder.recording)
+      || (action==="save-take" && !recorder.takeAvailable);
+  });
+  const recordings=recorder.recordings || [];
+  $("recorderFileList").innerHTML=recordings.length ? recordings.map(file=>`
+    <div class="recorder-file">
+      <span title="${escapeAttr(file.name)}">${escapeHtml(file.name)}</span>
+      <small>${new Date(Number(file.modifiedMs)).toLocaleString()} · ${formatFileSize(file.size)}</small>
+      <a href="/recordings/download?name=${encodeURIComponent(file.name)}" download>下载</a>
+    </div>`).join("") : "<span>还没有保存文件</span>";
+}
+async function fetchRecorder(){
+  try{ renderRecorder(await fetch("/recorder",{cache:"no-store"}).then(response=>response.json())); }
+  catch(e){
+    $("recorderMessage").textContent="Recorder offline";
+    $("recorderMessage").classList.remove("ok");
+  }
+}
+async function recorderAction(button){
+  if(recorderBusy) return;
+  recorderBusy=true;
+  renderRecorder(recorderState || {});
+  $("recorderMessage").textContent="处理中…";
+  $("recorderMessage").classList.remove("ok");
+  const params=new URLSearchParams({action:button.dataset.recorderAction});
+  if(button.dataset.seconds) params.set("seconds",button.dataset.seconds);
+  try{
+    const result=await fetch(`/recorder?${params.toString()}`,{cache:"no-store"}).then(response=>response.json());
+    if(result.error) throw new Error(result.error);
+    renderRecorder(result);
+    $("recorderMessage").textContent=button.dataset.recorderAction.startsWith("save") ? "MIDI 已保存，可以在下方下载" : "";
+    $("recorderMessage").classList.toggle("ok",!!$("recorderMessage").textContent);
+  } catch(error){
+    $("recorderMessage").textContent=error.message || "Recorder 操作失败";
+    $("recorderMessage").classList.remove("ok");
+  } finally {
+    recorderBusy=false;
+    if(recorderState) renderRecorder(recorderState);
+  }
+}
+document.querySelectorAll("[data-recorder-action]").forEach(button=>button.addEventListener("click",()=>recorderAction(button)));
+fetchRecorder();
+setInterval(fetchRecorder,1000);
 restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
 let pollingTimer = null;

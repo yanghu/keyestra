@@ -168,6 +168,43 @@ In Reaper, enable only the virtual mapped input such as `FP10 Mapped`. Do not en
 
 If recorded MIDI still has the original velocity, the track is probably listening to the raw FP-10 input instead of the mapped virtual input.
 
+## MIDI Recorder
+
+The monitor server continuously keeps the latest 60 minutes of mapped MIDI in
+memory. This includes Note On, Note Off, sustain and other CC messages, pitch
+bend, program changes, channel pressure, and SysEx. MIDI clock, active sensing,
+and other system real-time messages are intentionally ignored because they do
+not describe the piano performance and would make the rolling buffer noisy.
+
+Open the monitor page from the tray menu on a computer or phone to:
+
+- Mark the beginning and end of a take, then save it.
+- Save the latest 5 or 15 minutes without having started a take first.
+- Download any of the 20 most recently saved `.mid` files.
+
+Recordings are written atomically to:
+
+```text
+%APPDATA%\fp10-map\recordings
+```
+
+The files use a fixed high-resolution timing scale and can be imported into
+Reaper or another DAW without quantizing the performance. At the end of each
+export, the recorder writes sustain-off and all-notes-off messages on every
+channel used by the take to prevent stuck notes during playback.
+
+The rolling buffer currently lives in memory, so restarting the monitor clears
+unsaved material. Saved `.mid` files remain on disk.
+
+Planned recorder follow-ups:
+
+- Preview a saved or buffered range from the phone.
+- Show a compact performance timeline and drag exact start/end handles before
+  saving.
+- Add a crash-recoverable rolling journal for unsaved performances.
+- Replay through a selectable MIDI output and stop safely with sustain/all
+  notes off.
+
 ## Current Scope
 
 Implemented:
@@ -179,6 +216,7 @@ Implemented:
 - Preserve Note On velocity `0`, Note Off, sustain pedal, CC, pitch bend, and all other messages.
 - Support curve and table config.
 - Support monitor and bypass modes.
+- Keep a 60-minute rolling MIDI recording buffer with take and recent-range export.
 - Stop cleanly with Ctrl+C.
 
 Future useful additions:
@@ -186,4 +224,4 @@ Future useful additions:
 - Device reconnect loop.
 - CSV velocity logging for practice analysis.
 - Histogram/monitor-only mode.
-- Tray app or simple GUI curve editor.
+- Simple GUI curve editor.

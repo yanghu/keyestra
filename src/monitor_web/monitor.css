@@ -6,6 +6,27 @@ header { display:flex; align-items:end; justify-content:space-between; gap:20px;
 h1,h2,p { margin:0; } h1 { font-size:clamp(28px,4vw,42px); line-height:1; } h2 { font-size:17px; }
 .subtitle,.summary { color:var(--muted); font-size:14px; }
 .status { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fbfcfa; color:var(--accent); font-weight:750; }
+.recorder-panel { margin-bottom:16px; }
+.recorder-heading { margin-bottom:12px; }
+.recorder-live { display:flex; align-items:center; gap:7px; color:var(--accent); font-size:13px; font-weight:850; }
+.recorder-live span { width:9px; height:9px; border-radius:50%; background:var(--red); box-shadow:0 0 0 4px rgba(178,65,47,.12); }
+.recorder-layout { display:grid; grid-template-columns:minmax(300px,.8fr) minmax(480px,1.2fr); gap:14px; align-items:center; }
+.recorder-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.recorder-stats div { min-width:0; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fbfcfa; }
+.recorder-stats strong { display:block; overflow:hidden; color:var(--ink); font-size:22px; line-height:1.1; text-overflow:ellipsis; }
+.recorder-stats span { display:block; margin-top:4px; color:var(--muted); font-size:11px; font-weight:750; }
+.recorder-actions { display:grid; grid-template-columns:repeat(5,minmax(92px,1fr)); gap:7px; }
+.recorder-actions button { min-height:42px; border:1px solid var(--accent); border-radius:8px; background:#fff; color:var(--accent); padding:6px 8px; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.recorder-actions button:first-child { background:var(--accent); color:#fff; }
+.recorder-actions button:disabled { cursor:not-allowed; opacity:.42; }
+.recorder-message { min-height:18px; margin-top:8px; color:var(--red); font-size:12px; font-weight:750; }
+.recorder-message.ok { color:var(--accent); }
+.recorder-files summary { min-height:30px; display:flex; align-items:center; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
+.recorder-file-list { display:grid; gap:6px; padding-top:4px; }
+.recorder-file { display:grid; grid-template-columns:minmax(120px,1fr) auto auto; gap:10px; align-items:center; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fbfcfa; font-size:12px; }
+.recorder-file span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.recorder-file small { color:var(--muted); }
+.recorder-file a { color:var(--accent); font-weight:850; text-decoration:none; }
 .grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,.8fr); gap:16px; }
 .lower { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.8fr); gap:16px; margin-top:16px; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; box-shadow:0 16px 40px rgba(24,32,29,.08); }
@@ -93,6 +114,17 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   h2 { font-size:15px; }
   .subtitle { display:none; }
   .status { max-width:46vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .recorder-panel { margin:0; padding:10px; box-shadow:none; order:-2; }
+  .recorder-heading { margin-bottom:8px; }
+  .recorder-layout { grid-template-columns:1fr; gap:8px; }
+  .recorder-stats div { padding:8px; }
+  .recorder-stats strong { font-size:19px; }
+  .recorder-actions { grid-template-columns:repeat(2,1fr); }
+  .recorder-actions button { min-height:40px; }
+  .recorder-actions button:last-child { grid-column:1/-1; }
+  .recorder-message { margin-top:5px; }
+  .recorder-file { grid-template-columns:minmax(100px,1fr) auto; }
+  .recorder-file small { display:none; }
   .grid,.timeline,.lower { display:none; }
   .mobile-practice { display:grid; gap:8px; }
   .mobile-practice > .metronome-panel { order:-1; }

@@ -15,6 +15,34 @@
       </div>
       <div class="status" id="status">连接中</div>
     </header>
+    <section class="panel recorder-panel" aria-label="MIDI Recorder">
+      <div class="heading recorder-heading">
+        <div>
+          <h2>MIDI Recorder</h2>
+          <div class="summary" id="recorderSummary">正在连接录音器</div>
+        </div>
+        <div class="recorder-live"><span></span>持续缓存</div>
+      </div>
+      <div class="recorder-layout">
+        <div class="recorder-stats">
+          <div><strong id="recorderDuration">0:00</strong><span>缓存时长</span></div>
+          <div><strong id="recorderEvents">0</strong><span>MIDI 事件</span></div>
+          <div><strong id="recorderTakeDuration">--</strong><span>当前 Take</span></div>
+        </div>
+        <div class="recorder-actions">
+          <button type="button" data-recorder-action="start">开始 Take</button>
+          <button type="button" data-recorder-action="stop">停止</button>
+          <button type="button" data-recorder-action="save-take">保存 Take</button>
+          <button type="button" data-recorder-action="save-recent" data-seconds="300">保存最近 5 分钟</button>
+          <button type="button" data-recorder-action="save-recent" data-seconds="900">保存最近 15 分钟</button>
+        </div>
+      </div>
+      <div class="recorder-message" id="recorderMessage"></div>
+      <details class="recorder-files">
+        <summary>已保存的 MIDI</summary>
+        <div id="recorderFileList" class="recorder-file-list"><span>还没有保存文件</span></div>
+      </details>
+    </section>
     <section class="mobile-practice" aria-label="移动端练琴反馈">
       <section class="mobile-hero">
         <div>

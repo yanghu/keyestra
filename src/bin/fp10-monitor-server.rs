@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,8 +17,11 @@ use midir::{Ignore, MidiInput, MidiInputPort};
 
 #[path = "../metronome.rs"]
 mod metronome;
+#[path = "../recorder.rs"]
+mod recorder;
 
 use metronome::{Metronome, MetronomePatch};
+use recorder::Recorder;
 
 #[derive(Debug, Parser)]
 #[command(name = "fp10-monitor-server")]
@@ -38,6 +42,9 @@ struct Cli {
 
     #[arg(long, default_value = "0.0.0.0", help = "HTTP bind host")]
     host: String,
+
+    #[arg(long, help = "Directory for saved MIDI recordings")]
+    recordings_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,13 +232,20 @@ fn main() -> Result<()> {
     let input_name = midi_in.port_name(&input_port)?;
     let state = Arc::new(Mutex::new(MonitorState::new(input_name.clone())));
     let metronome = Arc::new(Metronome::new());
+    let recordings_dir = cli
+        .recordings_dir
+        .map(Ok)
+        .unwrap_or_else(Recorder::default_directory)?;
+    let recorder = Arc::new(Recorder::new(recordings_dir)?);
     let midi_state = Arc::clone(&state);
+    let midi_recorder = Arc::clone(&recorder);
 
     let _conn = midi_in
         .connect(
             &input_port,
             "fp10-monitor-input",
             move |_timestamp, message, _| {
+                midi_recorder.ingest(message);
                 if let Ok(mut state) = midi_state.lock() {
                     state.ingest(message);
                 }
@@ -256,8 +270,9 @@ fn main() -> Result<()> {
             Ok(stream) => {
                 let state = Arc::clone(&state);
                 let metronome = Arc::clone(&metronome);
+                let recorder = Arc::clone(&recorder);
                 thread::spawn(move || {
-                    if let Err(error) = handle_client(stream, state, metronome) {
+                    if let Err(error) = handle_client(stream, state, metronome, recorder) {
                         eprintln!("HTTP error: {}", error);
                     }
                 });
@@ -328,6 +343,7 @@ fn handle_client(
     mut stream: TcpStream,
     state: Arc<Mutex<MonitorState>>,
     metronome: Arc<Metronome>,
+    recorder: Arc<Recorder>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -402,6 +418,45 @@ fn handle_client(
                 &json,
             )
         }
+        "/recorder" => {
+            let result = match query_value(query, "action").as_deref() {
+                Some("start") => recorder.start_take(),
+                Some("stop") => recorder.stop_take(),
+                Some("save-take") => recorder.save_take().map(|_| ()),
+                Some("save-recent") => {
+                    let seconds = query_value(query, "seconds")
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(300);
+                    recorder.save_recent(seconds).map(|_| ())
+                }
+                Some(_) => Err(anyhow::anyhow!("Unknown recorder action")),
+                None => Ok(()),
+            };
+            let body = match result {
+                Ok(()) => recorder.status_json(),
+                Err(error) => format!("{{\"error\":\"{}\"}}", escape_json(&error.to_string())),
+            };
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+            )
+        }
+        "/recordings/download" => {
+            let result = query_value(query, "name")
+                .ok_or_else(|| anyhow::anyhow!("Missing recording name"))
+                .and_then(|name| recorder.read_recording(&name).map(|bytes| (name, bytes)));
+            match result {
+                Ok((name, bytes)) => respond_download(&mut stream, &name, &bytes),
+                Err(error) => respond(
+                    &mut stream,
+                    "404 Not Found",
+                    "text/plain; charset=utf-8",
+                    &error.to_string(),
+                ),
+            }
+        }
         _ => respond(
             &mut stream,
             "404 Not Found",
@@ -416,6 +471,13 @@ fn split_target(target: &str) -> (&str, &str) {
         Some((path, query)) => (path, query),
         None => (target, ""),
     }
+}
+
+fn query_value(query: &str, desired_key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == desired_key).then(|| percent_decode(value))
+    })
 }
 
 fn parse_metronome_patch(query: &str) -> MetronomePatch {
@@ -619,6 +681,17 @@ fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str)
         body.as_bytes().len(),
         body
     )?;
+    Ok(())
+}
+
+fn respond_download(stream: &mut TcpStream, name: &str, body: &[u8]) -> Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: audio/midi\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        name,
+        body.len()
+    )?;
+    stream.write_all(body)?;
     Ok(())
 }
 
