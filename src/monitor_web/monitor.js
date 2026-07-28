@@ -404,6 +404,113 @@ document.querySelectorAll(".split-select").forEach(select=>select.addEventListen
   if(state.latestData) render(state.latestData); else applyFilterSettings(mode, split);
 }));
 $("seedLog").addEventListener("click",async()=>{ const button=$("seedLog"); button.disabled=true; button.textContent="载入中"; try{ const result=await fetch("/seed-log",{cache:"no-store"}).then(r=>r.json()); button.textContent=result.loaded ? `已载入 ${result.loaded}` : "无日志"; } catch(e){ button.textContent="载入失败"; } setTimeout(()=>{ button.disabled=false; button.textContent="载入日志"; },1400); });
+let metronomeState = null;
+let metronomeServerOffsetMs = 0;
+let metronomeAnimationFrame = null;
+let metronomeFallbackTimer = null;
+let metronomeEventSource = null;
+function metronomeControls(selector){ return Array.from(document.querySelectorAll(selector)); }
+function renderMetronome(metro){
+  metronomeState = metro;
+  if(Number.isFinite(Number(metro.serverTimeMs))) metronomeServerOffsetMs = Number(metro.serverTimeMs) - Date.now();
+  metronomeControls(".metronome-toggle").forEach(button=>{
+    button.textContent = metro.running ? "Stop" : "Start";
+    button.classList.toggle("running", !!metro.running);
+  });
+  metronomeControls(".metronome-bpm").forEach(input=>{ if(document.activeElement!==input) input.value=metro.bpm; });
+  metronomeControls(".metronome-beats").forEach(select=>{ select.value=String(metro.beatsPerBar || 4); });
+  metronomeControls(".metronome-subdivision").forEach(select=>{ select.value=String(metro.subdivision || 1); });
+  metronomeControls(".metronome-volume").forEach(input=>{ input.value=metro.volume ?? 0.35; });
+  metronomeControls(".metronome-output").forEach(select=>{
+    const selected = metro.outputDevice || "";
+    const options = [`<option value="">Default output</option>`].concat((metro.devices || []).map(device=>`<option value="${escapeAttr(device)}">${escapeHtml(device)}</option>`));
+    const html = options.join("");
+    if(select.innerHTML !== html) select.innerHTML = html;
+    select.value = selected;
+  });
+  const deviceLabel = metro.outputDevice || metro.activeDevice || "Default output";
+  document.querySelectorAll('[data-metronome-field="device"]').forEach(el=>{ el.textContent = deviceLabel; });
+  document.querySelectorAll('[data-metronome-field="error"]').forEach(el=>{ el.textContent = metro.error || ""; });
+  renderMetronomeBeat();
+  scheduleMetronomeAnimation();
+}
+function renderMetronomeBeat(){
+  const metro = metronomeState || {};
+  const beat = currentMetronomeBeat(metro);
+  metronomeControls(".metronome-beats-display").forEach(el=>{
+    const beats = Math.max(1, Number(metro.beatsPerBar || 4));
+    el.innerHTML = Array.from({length:beats},(_,index)=>{
+      const active = metro.running && index === beat;
+      return `<span class="metronome-dot ${index===0?"accent":""} ${active?"active":""}"></span>`;
+    }).join("");
+  });
+}
+function currentMetronomeBeat(metro){
+  if(!metro.running) return Number(metro.currentBeat || 0);
+  const startedAt = Number(metro.startedAtMs);
+  if(!Number.isFinite(startedAt)) return Number(metro.currentBeat || 0);
+  const bpm = Math.max(1, Number(metro.bpm || 80));
+  const subdivision = Math.max(1, Number(metro.subdivision || 1));
+  const beats = Math.max(1, Number(metro.beatsPerBar || 4));
+  const elapsed = Math.max(0, Date.now() + metronomeServerOffsetMs - startedAt);
+  const clickMs = 60000 / bpm / subdivision;
+  const clickIndex = Math.floor(elapsed / clickMs);
+  return Math.floor(clickIndex / subdivision) % beats;
+}
+function scheduleMetronomeAnimation(){
+  if(metronomeAnimationFrame || !metronomeState?.running) return;
+  const tick=()=>{
+    metronomeAnimationFrame = null;
+    if(!metronomeState?.running) return;
+    renderMetronomeBeat();
+    metronomeAnimationFrame = requestAnimationFrame(tick);
+  };
+  metronomeAnimationFrame = requestAnimationFrame(tick);
+}
+function escapeHtml(value){ return String(value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch])); }
+function escapeAttr(value){ return escapeHtml(value); }
+async function fetchMetronome(){
+  try{ renderMetronome(await fetch("/metronome",{cache:"no-store"}).then(r=>r.json())); }
+  catch(e){ document.querySelectorAll('[data-metronome-field="error"]').forEach(el=>{ el.textContent = "Metronome offline"; }); }
+}
+async function updateMetronome(patch){
+  const params = new URLSearchParams();
+  Object.entries(patch).forEach(([key,value])=>params.set(key, value));
+  try{ renderMetronome(await fetch(`/metronome?${params.toString()}`,{cache:"no-store"}).then(r=>r.json())); }
+  catch(e){ document.querySelectorAll('[data-metronome-field="error"]').forEach(el=>{ el.textContent = "Metronome update failed"; }); }
+}
+function startMetronomeFallback(){
+  if(metronomeFallbackTimer) return;
+  metronomeFallbackTimer = setInterval(fetchMetronome, 2000);
+}
+function stopMetronomeFallback(){
+  if(!metronomeFallbackTimer) return;
+  clearInterval(metronomeFallbackTimer);
+  metronomeFallbackTimer = null;
+}
+function connectMetronomeEvents(){
+  if(!window.EventSource){ startMetronomeFallback(); fetchMetronome(); return; }
+  metronomeEventSource = new EventSource("/metronome-events");
+  metronomeEventSource.addEventListener("metronome",(event)=>{ try{ renderMetronome(JSON.parse(event.data)); } catch(e){} });
+  metronomeEventSource.onerror = ()=>{
+    if(metronomeEventSource){ metronomeEventSource.close(); metronomeEventSource=null; }
+    startMetronomeFallback();
+    setTimeout(()=>{ stopMetronomeFallback(); connectMetronomeEvents(); },2500);
+  };
+}
+document.querySelectorAll("[data-metronome-toggle]").forEach(button=>button.addEventListener("click",()=>updateMetronome({running: metronomeState && metronomeState.running ? 0 : 1})));
+document.querySelectorAll("[data-metronome-bpm-step]").forEach(button=>button.addEventListener("click",()=>{
+  const current = Number(metronomeState?.bpm || document.querySelector(".metronome-bpm")?.value || 80);
+  const next = Math.max(30, Math.min(240, current + Number(button.dataset.metronomeBpmStep || 0)));
+  updateMetronome({bpm:next});
+}));
+document.querySelectorAll(".metronome-bpm").forEach(input=>input.addEventListener("change",()=>updateMetronome({bpm:Math.max(30,Math.min(240,Number(input.value || 80)))})));
+document.querySelectorAll(".metronome-beats").forEach(select=>select.addEventListener("change",()=>updateMetronome({beatsPerBar:select.value})));
+document.querySelectorAll(".metronome-subdivision").forEach(select=>select.addEventListener("change",()=>updateMetronome({subdivision:select.value})));
+document.querySelectorAll(".metronome-volume").forEach(input=>input.addEventListener("input",()=>updateMetronome({volume:input.value})));
+document.querySelectorAll(".metronome-output").forEach(select=>select.addEventListener("change",()=>updateMetronome({outputDevice:select.value})));
+fetchMetronome();
+connectMetronomeEvents();
 restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
 let pollingTimer = null;

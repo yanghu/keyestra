@@ -62,6 +62,27 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
 .raw-row { display:grid; grid-template-columns:92px 110px 48px minmax(100px,160px); gap:10px; min-height:28px; color:var(--muted); font-size:13px; align-items:center; }
 .raw-row strong { color:var(--ink); } code { color:var(--red); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .velocity-pp { background:var(--pp); } .velocity-pp-p { background:var(--pp-p); } .velocity-p { background:var(--p); } .velocity-p-mp { background:var(--p-mp); } .velocity-mp { background:var(--mp); } .velocity-mp-mf { background:var(--mp-mf); } .velocity-mf { background:var(--mf); } .velocity-mf-f { background:var(--mf-f); } .velocity-f { background:var(--f); } .velocity-f-ff { background:var(--f-ff); } .velocity-ff { background:var(--ff); }
+.desktop-metronome { margin-top:16px; }
+.desktop-metronome-grid { display:grid; grid-template-columns:260px minmax(180px,1fr) minmax(300px,1.2fr); gap:14px; align-items:center; }
+.metronome-main { display:grid; grid-template-columns:52px minmax(104px,1fr) 52px; gap:8px; align-items:center; }
+.metronome-step,.metronome-toggle { height:36px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--accent); font:inherit; font-weight:850; cursor:pointer; }
+.metronome-toggle { min-width:76px; padding:0 12px; background:var(--accent); color:#fff; border-color:var(--accent); }
+.metronome-toggle.running { background:var(--red); border-color:var(--red); }
+.metronome-bpm-wrap { min-width:0; display:grid; grid-template-columns:1fr auto; align-items:center; gap:6px; height:48px; border:1px solid var(--line); border-radius:8px; padding:5px 8px; background:#fbfcfa; color:var(--muted); font-size:12px; font-weight:850; }
+.metronome-bpm { width:100%; min-width:0; height:34px; border:0; background:transparent; color:var(--ink); font:inherit; font-size:30px; font-weight:900; text-align:center; }
+.metronome-beats-display { min-height:38px; display:flex; align-items:center; justify-content:center; gap:8px; padding:7px 8px; border:1px solid var(--line); border-radius:8px; background:#fbfcfa; }
+.metronome-dot { width:13px; height:13px; border-radius:50%; background:#ccd5ce; transition:transform .08s ease, background .08s ease; }
+.metronome-dot.active { transform:scale(1.35); background:var(--accent); }
+.metronome-dot.accent.active { background:var(--red); }
+.metronome-controls { display:grid; grid-template-columns:86px 104px minmax(120px,1fr); gap:8px; align-items:center; }
+.metronome-volume-wrap { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; font-weight:800; }
+.metronome-volume { width:100%; min-width:80px; accent-color:var(--accent); }
+.metronome-output { width:100%; }
+.metronome-settings { margin-top:8px; }
+.metronome-settings summary { min-height:28px; display:flex; align-items:center; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
+.metronome-settings .metronome-controls { margin-top:6px; }
+.metronome-settings .metronome-output { margin-top:8px; }
+.metronome-error { min-height:18px; margin-top:8px; color:var(--red); font-size:12px; font-weight:750; }
 .mobile-practice { display:none; }
 @media (max-width:860px){ header,.grid,.lower{grid-template-columns:1fr;display:grid;align-items:start;} header{align-items:start;} .tools{justify-content:flex-start;} .raw-row{grid-template-columns:86px 1fr 44px;} code{grid-column:1/-1;} }
 @media (max-width:700px){
@@ -74,6 +95,7 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .status { max-width:46vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
   .grid,.timeline,.lower { display:none; }
   .mobile-practice { display:grid; gap:8px; }
+  .mobile-practice > .metronome-panel { order:-1; }
   .mobile-hero,.mobile-panel,.mobile-details { border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:none; }
   .mobile-hero { min-height:104px; display:grid; grid-template-columns:1fr auto; align-items:end; gap:10px; padding:12px; }
   .mobile-label,.mobile-panel span,.mobile-details { color:var(--muted); font-size:12px; font-weight:700; }
@@ -92,6 +114,19 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .mobile-filter .split-select { height:28px; max-width:116px; font-size:12px; font-weight:750; }
   .filter-buttons { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
   .filter-button { height:30px; font-size:12px; }
+  .desktop-metronome { display:none; }
+  .metronome-main { grid-template-columns:48px 1fr 48px; }
+  .metronome-step,.metronome-toggle { height:34px; }
+  .metronome-bpm-wrap { height:46px; }
+  .metronome-bpm { font-size:28px; }
+  .metronome-beats-display { min-height:34px; margin-top:8px; gap:7px; }
+  .metronome-dot { width:11px; height:11px; }
+  .metronome-controls { grid-template-columns:1fr 1fr; margin-top:8px; }
+  .metronome-volume-wrap { grid-column:1/-1; }
+  .metronome-settings { margin-top:4px; }
+  .metronome-settings summary { min-height:30px; }
+  .metronome-output { width:100%; }
+  .metronome-error { margin-top:6px; }
   .mobile-score-bar { height:10px; overflow:hidden; border-radius:999px; background:var(--soft); }
   .mobile-score-bar span { display:block; width:0%; height:100%; border-radius:inherit; background:var(--accent); transition:width .16s ease; }
   .mobile-trend { position:relative; height:112px; display:flex; align-items:flex-end; gap:3px; padding:8px 8px 12px; border:1px solid var(--line); border-radius:8px; background:linear-gradient(to top, rgba(24,32,29,.05) 1px, transparent 1px) 0 22px/100% 22px,#fbfcfa; overflow:hidden; }

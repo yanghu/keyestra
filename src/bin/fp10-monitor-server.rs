@@ -14,6 +14,11 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use midir::{Ignore, MidiInput, MidiInputPort};
 
+#[path = "../metronome.rs"]
+mod metronome;
+
+use metronome::{Metronome, MetronomePatch};
+
 #[derive(Debug, Parser)]
 #[command(name = "fp10-monitor-server")]
 #[command(about = "Native MIDI monitor backend with a local web dashboard")]
@@ -219,6 +224,7 @@ fn main() -> Result<()> {
     let input_port = select_input_port(&midi_in, &selector)?;
     let input_name = midi_in.port_name(&input_port)?;
     let state = Arc::new(Mutex::new(MonitorState::new(input_name.clone())));
+    let metronome = Arc::new(Metronome::new());
     let midi_state = Arc::clone(&state);
 
     let _conn = midi_in
@@ -249,8 +255,9 @@ fn main() -> Result<()> {
         match stream {
             Ok(stream) => {
                 let state = Arc::clone(&state);
+                let metronome = Arc::clone(&metronome);
                 thread::spawn(move || {
-                    if let Err(error) = handle_client(stream, state) {
+                    if let Err(error) = handle_client(stream, state, metronome) {
                         eprintln!("HTTP error: {}", error);
                     }
                 });
@@ -317,19 +324,23 @@ fn input_port_error(
     anyhow::anyhow!(lines.join("\n"))
 }
 
-fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Result<()> {
+fn handle_client(
+    mut stream: TcpStream,
+    state: Arc<Mutex<MonitorState>>,
+    metronome: Arc<Metronome>,
+) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
 
     let mut buffer = [0_u8; 2048];
     let bytes_read = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-    let path = request
+    let target = request
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|path| path.split('?').next())
         .unwrap_or("/");
+    let (path, query) = split_target(target);
 
     match path {
         "/" | "/index.html" => respond(
@@ -366,6 +377,7 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
             )
         }
         "/events" => respond_events(stream, state),
+        "/metronome-events" => respond_metronome_events(stream, metronome),
         "/seed-log" => {
             let body = match seed_from_tray_log(&state) {
                 Ok(count) => format!("{{\"loaded\":{}}}", count),
@@ -378,6 +390,18 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
                 &body,
             )
         }
+        "/metronome" => {
+            if !query.is_empty() {
+                metronome.apply_patch(parse_metronome_patch(query));
+            }
+            let json = metronome.to_json();
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &json,
+            )
+        }
         _ => respond(
             &mut stream,
             "404 Not Found",
@@ -385,6 +409,81 @@ fn handle_client(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Resu
             "Not found",
         ),
     }
+}
+
+fn split_target(target: &str) -> (&str, &str) {
+    match target.split_once('?') {
+        Some((path, query)) => (path, query),
+        None => (target, ""),
+    }
+}
+
+fn parse_metronome_patch(query: &str) -> MetronomePatch {
+    let mut patch = MetronomePatch {
+        running: None,
+        bpm: None,
+        beats_per_bar: None,
+        subdivision: None,
+        volume: None,
+        output_device: None,
+    };
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let value = percent_decode(value);
+        match key {
+            "running" => {
+                patch.running = match value.as_str() {
+                    "1" | "true" | "on" => Some(true),
+                    "0" | "false" | "off" => Some(false),
+                    _ => None,
+                };
+            }
+            "bpm" => patch.bpm = value.parse().ok(),
+            "beatsPerBar" => patch.beats_per_bar = value.parse().ok(),
+            "subdivision" => patch.subdivision = value.parse().ok(),
+            "volume" => patch.volume = value.parse().ok(),
+            "outputDevice" => {
+                patch.output_device = if value.trim().is_empty() {
+                    Some(None)
+                } else {
+                    Some(Some(value))
+                };
+            }
+            _ => {}
+        }
+    }
+    patch
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hex = &value[index + 1..index + 3];
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    out.push(byte);
+                    index += 3;
+                } else {
+                    out.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
 }
 
 fn respond_events(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Result<()> {
@@ -410,6 +509,40 @@ fn respond_events(mut stream: TcpStream, state: Arc<Mutex<MonitorState>>) -> Res
             write!(stream, "event: state\ndata: {}\n\n", json)?;
             stream.flush()?;
             last_json = json;
+            ticks_since_heartbeat = 0;
+        } else {
+            ticks_since_heartbeat = ticks_since_heartbeat.saturating_add(1);
+            if ticks_since_heartbeat >= 25 {
+                write!(stream, ": heartbeat\n\n")?;
+                stream.flush()?;
+                ticks_since_heartbeat = 0;
+            }
+        }
+
+        thread::sleep(Duration::from_millis(120));
+    }
+}
+
+fn respond_metronome_events(mut stream: TcpStream, metronome: Arc<Metronome>) -> Result<()> {
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n"
+    )?;
+    stream.flush()?;
+
+    let mut last_key = String::new();
+    let mut ticks_since_heartbeat = 0_u8;
+    loop {
+        let key = metronome.event_key();
+        if key != last_key {
+            write!(
+                stream,
+                "event: metronome\ndata: {}\n\n",
+                metronome.event_json()
+            )?;
+            stream.flush()?;
+            last_key = key;
             ticks_since_heartbeat = 0;
         } else {
             ticks_since_heartbeat = ticks_since_heartbeat.saturating_add(1);

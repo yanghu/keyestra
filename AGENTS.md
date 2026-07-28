@@ -31,6 +31,10 @@ to stop the running `fp10-map`, `fp10-map-tray`, and `fp10-monitor-server`
 processes first, rebuild the three release binaries, then restart
 `target\release\fp10-map-tray.exe`.
 
+When restarting `target\release\fp10-map-tray.exe` from Codex after a release
+build, launch it with elevated permissions. Starting the tray app inside the
+normal sandbox can return immediately without leaving the tray process running.
+
 ## MIDI Invariants
 
 - Preserve MIDI messages other than Note On velocity mapping. Note Off, sustain
