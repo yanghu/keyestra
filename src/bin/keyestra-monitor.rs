@@ -413,6 +413,18 @@ fn handle_client(
             "application/javascript; charset=utf-8",
             MONITOR_JS,
         ),
+        "/assets/keyestra-app.svg" => respond(
+            &mut stream,
+            "200 OK",
+            "image/svg+xml; charset=utf-8",
+            KEYESTRA_APP_ICON,
+        ),
+        "/assets/keyestra-tray.svg" | "/favicon.svg" => respond(
+            &mut stream,
+            "200 OK",
+            "image/svg+xml; charset=utf-8",
+            KEYESTRA_TRAY_ICON,
+        ),
         "/version" => {
             let body = serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
@@ -1251,6 +1263,8 @@ fn escape_json(value: &str) -> String {
 const INDEX_HTML: &str = include_str!("../monitor_web/index.html");
 const MONITOR_CSS: &str = include_str!("../monitor_web/monitor.css");
 const MONITOR_JS: &str = include_str!("../monitor_web/monitor.js");
+const KEYESTRA_APP_ICON: &str = include_str!("../../assets/icons/keyestra-app.svg");
+const KEYESTRA_TRAY_ICON: &str = include_str!("../../assets/icons/keyestra-tray.svg");
 
 #[cfg(test)]
 mod tests {

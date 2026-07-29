@@ -4,15 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Keyestra — Digital Piano Companion</title>
+  <link rel="icon" href="/assets/keyestra-tray.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/monitor.css">
 </head>
 <body>
   <main>
     <header>
-      <div>
-        <h1>Keyestra</h1>
-        <p class="tagline">Digital Piano Companion</p>
-        <p class="subtitle">Rust 后端读取 MIDI，浏览器只显示数据。</p>
+      <div class="brand">
+        <img class="brand-icon" src="/assets/keyestra-app.svg" alt="" width="36" height="36">
+        <div>
+          <h1>Keyestra</h1>
+          <p class="tagline">Digital Piano Companion</p>
+          <p class="subtitle">Rust 后端读取 MIDI，浏览器只显示数据。</p>
+        </div>
       </div>
       <div class="status" id="status">连接中</div>
     </header>

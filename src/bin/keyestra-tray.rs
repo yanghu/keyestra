@@ -1080,35 +1080,21 @@ fn append_log_file(path: &Path) -> Result<File> {
 }
 
 fn tray_icon() -> Icon {
-    let size = 32;
-    let mut rgba = Vec::with_capacity(size * size * 4);
+    const SIZE: u32 = 32;
+    const RGBA: &[u8; (SIZE * SIZE * 4) as usize] =
+        include_bytes!("../../assets/icons/keyestra-tray-32.rgba");
 
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - 15.5;
-            let dy = y as f32 - 15.5;
-            let distance = (dx * dx + dy * dy).sqrt();
-            let inside = distance < 14.0;
-            let highlight = x > 9 && x < 23 && y > 7 && y < 24;
-
-            let (r, g, b, a) = if !inside {
-                (0, 0, 0, 0)
-            } else if highlight {
-                (245, 255, 250, 255)
-            } else {
-                (20, 108, 108, 255)
-            };
-
-            rgba.extend_from_slice(&[r, g, b, a]);
-        }
-    }
-
-    Icon::from_rgba(rgba, size as u32, size as u32).expect("valid tray icon")
+    Icon::from_rgba(RGBA.to_vec(), SIZE, SIZE).expect("valid embedded Keyestra tray icon")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_tray_icon_is_valid() {
+        let _icon = tray_icon();
+    }
 
     #[test]
     fn retry_delay_backs_off_and_caps_at_one_minute() {

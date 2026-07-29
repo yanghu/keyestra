@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=assets/icons/keyestra.ico");
     println!("cargo:rerun-if-env-changed=KEYESTRA_BUILD_ID_OVERRIDE");
     if let Ok(head) = fs::read_to_string(".git/HEAD") {
         if let Some(reference) = head.trim().strip_prefix("ref: ") {
@@ -16,6 +17,13 @@ fn main() {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(git_build_id);
     println!("cargo:rustc-env=KEYESTRA_BUILD_ID={build_id}");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        winresource::WindowsResource::new()
+            .set_icon("assets/icons/keyestra.ico")
+            .compile()
+            .expect("failed to embed the Keyestra Windows icon");
+    }
 }
 
 fn git_build_id() -> String {
