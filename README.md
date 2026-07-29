@@ -72,9 +72,6 @@ Create a virtual MIDI port named:
 Keyestra MIDI
 ```
 
-The runtime also recognizes the legacy `FP10 Mapped` name as a migration
-fallback.
-
 ### 2. List available ports
 
 ```powershell
@@ -301,8 +298,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\deploy-windows.ps1 -Activate
 ```
 
-> **Activation stops Keyestra and legacy FP10 processes and permanently
-> discards the unsaved in-memory recorder buffer.**
+> **Activation stops the running Keyestra processes and permanently discards
+> the unsaved in-memory recorder buffer.**
 
 Release identity makes the source state explicit:
 
@@ -335,17 +332,6 @@ Remove current-user Startup:
 
 Tray logs are stored at `%APPDATA%\keyestra\tray.log`, capped at 5 MB, with one
 rotated backup at `tray.log.1`.
-
-## Migration from fp10-map
-
-On first launch, Keyestra copies legacy settings and saved `.mid` recordings
-from `%APPDATA%\fp10-map` into `%APPDATA%\keyestra`. Source files are retained
-as a backup.
-
-Installing Keyestra Startup writes `keyestra-tray.vbs` and removes the legacy
-`fp10-map-tray.vbs` only after the new entry has been written successfully.
-Built-in curve selections are migrated to the current deployed release, while
-explicit custom curve paths remain unchanged.
 
 ## Development
 
