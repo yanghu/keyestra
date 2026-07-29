@@ -68,8 +68,8 @@ Use a `430 × 932` browser viewport for the three phone screenshots:
 3. **Clip editor:** expand **编辑片段**, choose **30 秒**, and frame the overview,
    detailed selection, boundary controls, preview, and save button.
 
-`mobile-showcase.html` composes the three phone captures into the `1440 × 720`
-README hero. Open it at that viewport and replace
+`mobile-showcase.html` composes the three phone captures into the README hero.
+Open it at a `2880 × 1440` viewport to render the 2× asset, then replace
 `screenshots/keyestra-mobile-remote.png` after refreshing any source image.
 
 These are documentation fixtures, not prerecorded MIDI files. Running the
