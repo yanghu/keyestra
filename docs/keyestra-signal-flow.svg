@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 560" role="img" aria-labelledby="title desc">
+  <title id="title">Keyestra system and MIDI signal flow</title>
+  <desc id="desc">A digital piano sends raw MIDI into Keyestra. Inside Keyestra, the velocity mapper shapes Note On velocity while preserving other messages. The mapped stream enters an existing Keyestra MIDI virtual port, which feeds virtual piano instruments, DAWs, and Keyestra's own Monitor, rhythm practice, and rolling recorder companion.</desc>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#173C3A" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#377976"/>
+    </marker>
+    <style>
+      .title { font: 700 22px Inter, "Segoe UI", Arial, sans-serif; fill: #172321; }
+      .group-title { font: 700 28px Inter, "Segoe UI", Arial, sans-serif; fill: #FFFFFF; }
+      .label { font: 700 14px Inter, "Segoe UI", Arial, sans-serif; fill: #245F5C; letter-spacing: 0.07em; }
+      .body { font: 500 16px Inter, "Segoe UI", Arial, sans-serif; fill: #4D5D59; }
+      .small { font: 500 14px Inter, "Segoe UI", Arial, sans-serif; fill: #687773; }
+      .flow-label { font: 700 13px Inter, "Segoe UI", Arial, sans-serif; fill: #377976; letter-spacing: 0.06em; }
+      .flow { fill: none; stroke: #377976; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .branch { fill: none; stroke: #377976; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+      .card { fill: #FFFFFF; stroke: #D3E0DC; stroke-width: 2; }
+      .icon-stroke { fill: none; stroke: #245F5C; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1540" height="560" rx="28" fill="#F2F6F3"/>
+  <path d="M0 88 C240 18 430 116 655 60 C890 2 1172 84 1540 20 L1540 0 L0 0 Z" fill="#DDECE7" opacity="0.72"/>
+  <circle cx="1470" cy="520" r="148" fill="#EBC9B8" opacity="0.24"/>
+
+  <!-- Digital piano -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="28" y="184" width="214" height="192" rx="24"/>
+  </g>
+  <g aria-hidden="true">
+    <rect x="67" y="217" width="136" height="52" rx="8" fill="#E8F1EE" stroke="#245F5C" stroke-width="3"/>
+    <path d="M84 217 V253 M101 217 V253 M118 217 V253 M135 217 V253 M152 217 V253 M169 217 V253 M186 217 V253" stroke="#245F5C" stroke-width="2"/>
+    <path d="M93 217 V239 M127 217 V239 M161 217 V239 M178 217 V239" stroke="#245F5C" stroke-width="8"/>
+    <circle cx="192" cy="294" r="7" fill="#D9672F"/>
+    <path d="M89 298 H181" stroke="#D2DDD9" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <text class="title" x="135" y="328" text-anchor="middle">Digital piano</text>
+  <text class="small" x="135" y="352" text-anchor="middle">or MIDI keyboard</text>
+
+  <!-- Keyestra product boundary -->
+  <g filter="url(#shadow)">
+    <rect x="292" y="42" width="620" height="476" rx="32" fill="#E2EFEB" stroke="#146C6C" stroke-width="3"/>
+  </g>
+  <path d="M292 74 Q292 42 324 42 H880 Q912 42 912 74 V117 H292 Z" fill="#146C6C"/>
+  <g aria-hidden="true">
+    <rect x="321" y="63" width="45" height="45" rx="11" fill="#FFFFFF"/>
+    <text x="343" y="96" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="31" font-weight="800" fill="#146C6C">K</text>
+    <circle cx="359" cy="93" r="4.5" fill="#D9672F"/>
+  </g>
+  <text class="group-title" x="382" y="92">Keyestra</text>
+  <text x="515" y="91" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="500" fill="#CFE4E0">mapper + performance companion</text>
+
+  <!-- Mapper inside Keyestra -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="326" y="144" width="540" height="162" rx="23"/>
+  </g>
+  <g aria-hidden="true">
+    <circle cx="366" cy="185" r="21" fill="#E4F0ED"/>
+    <path d="M350 185 H382 M359 175 V195 M373 171 V199" class="icon-stroke"/>
+    <circle cx="359" cy="180" r="5" fill="#D9672F"/>
+    <circle cx="373" cy="190" r="5" fill="#D9672F"/>
+  </g>
+  <text class="label" x="399" y="180">MIDI PROCESSING</text>
+  <text class="title" x="350" y="232">Velocity mapper</text>
+  <text class="small" x="350" y="261">Uses the selected curve</text>
+  <circle cx="576" cy="216" r="5" fill="#D9672F"/>
+  <text class="body" x="592" y="222">Shapes Note On velocity</text>
+  <circle cx="576" cy="258" r="5" fill="#D9672F"/>
+  <text class="body" x="592" y="264">Preserves all other MIDI</text>
+
+  <!-- Monitor/practice/recorder inside Keyestra -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="326" y="334" width="540" height="154" rx="23"/>
+  </g>
+  <g aria-hidden="true">
+    <circle cx="366" cy="375" r="21" fill="#E4F0ED"/>
+    <rect x="358" y="361" width="16" height="28" rx="3" class="icon-stroke"/>
+    <circle cx="366" cy="384" r="2" fill="#D9672F"/>
+  </g>
+  <text class="label" x="399" y="370">PERFORMANCE COMPANION</text>
+  <text class="title" x="350" y="422">Monitor · Practice · Recorder</text>
+  <text class="small" x="350" y="451">Desktop + phone browser</text>
+  <circle cx="650" cy="371" r="5" fill="#D9672F"/>
+  <text class="body" x="666" y="377">Live chords and dynamics</text>
+  <circle cx="650" cy="411" r="5" fill="#D9672F"/>
+  <text class="body" x="666" y="417">Rhythm timing feedback</text>
+  <circle cx="650" cy="451" r="5" fill="#D9672F"/>
+  <text class="body" x="666" y="457">60-minute rolling capture</text>
+
+  <!-- External virtual port -->
+  <g filter="url(#shadow)">
+    <rect x="954" y="190" width="194" height="176" rx="24" fill="#FFFFFF" stroke="#8EAAA5" stroke-width="2.5" stroke-dasharray="8 7"/>
+  </g>
+  <g aria-hidden="true">
+    <circle cx="1051" cy="235" r="23" fill="#E4F0ED" stroke="#245F5C" stroke-width="3"/>
+    <circle cx="1051" cy="235" r="7" fill="#D9672F"/>
+    <path d="M1022 235 H1007 M1095 235 H1080 M1051 206 V192 M1051 278 V264" class="icon-stroke"/>
+  </g>
+  <text class="label" x="1051" y="294" text-anchor="middle">EXISTING VIRTUAL PORT</text>
+  <text class="title" x="1051" y="324" text-anchor="middle">Keyestra MIDI</text>
+  <text class="small" x="1051" y="348" text-anchor="middle">loopMIDI / IAC</text>
+
+  <!-- External consumers -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="1212" y="70" width="298" height="168" rx="22"/>
+  </g>
+  <g aria-hidden="true">
+    <circle cx="1252" cy="111" r="21" fill="#E4F0ED"/>
+    <path d="M1246 120 V101 L1262 97 V114" class="icon-stroke"/>
+    <circle cx="1241" cy="121" r="5" fill="#245F5C"/>
+    <circle cx="1257" cy="115" r="5" fill="#245F5C"/>
+  </g>
+  <text class="title" x="1286" y="102">Virtual piano</text>
+  <text class="title" x="1286" y="127">instruments</text>
+  <text class="body" x="1286" y="157">Pianoteq</text>
+  <text class="body" x="1286" y="184">Garritan Abbey Road Studios</text>
+  <text class="body" x="1286" y="210">CFX Concert Grand</text>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="1212" y="292" width="298" height="150" rx="22"/>
+  </g>
+  <g aria-hidden="true">
+    <circle cx="1252" cy="333" r="21" fill="#E4F0ED"/>
+    <path d="M1241 324 H1263 M1241 333 H1256 M1241 342 H1267" class="icon-stroke"/>
+    <circle cx="1259" cy="324" r="4" fill="#D9672F"/>
+    <circle cx="1250" cy="333" r="4" fill="#D9672F"/>
+    <circle cx="1262" cy="342" r="4" fill="#D9672F"/>
+  </g>
+  <text class="title" x="1286" y="330">DAW or MIDI host</text>
+  <text class="body" x="1286" y="361">Reaper or another setup</text>
+  <text class="small" x="1286" y="391">Receives mapped MIDI</text>
+
+  <!-- Signal flow -->
+  <path class="flow" d="M242 280 H274 V225 H318"/>
+  <text class="flow-label" x="280" y="264" text-anchor="middle">RAW MIDI</text>
+
+  <path class="flow" d="M866 225 H946"/>
+  <text class="flow-label" x="906" y="209" text-anchor="middle">MAPPED MIDI</text>
+
+  <path class="branch" d="M1148 278 H1172"/>
+  <circle cx="1172" cy="278" r="7" fill="#D9672F"/>
+  <path class="flow" d="M1172 278 V154 H1204"/>
+  <path class="flow" d="M1172 278 V367 H1204"/>
+
+  <path class="flow" d="M1051 366 V411 H874"/>
+  <text class="flow-label" x="970" y="399" text-anchor="middle">PERFORMANCE FEED</text>
+</svg>

@@ -6,75 +6,64 @@
 
 <p align="center">
   <strong>Digital Piano Companion</strong><br>
-  Expressive velocity shaping, resilient MIDI routing, and a phone-ready
-  performance companion with practice feedback, a metronome, and a rolling recorder.
+  Shape your piano's response, understand your playing, and capture performances
+  from the computer or your phone.
 </p>
 
-Keyestra sits between a digital piano and the software instrument or DAW you
-already use. It makes the keyboard's velocity response more expressive while
-preserving the rest of the MIDI performance, then turns the mapped stream into
-useful live feedback and recoverable recordings.
+Keyestra sits between a digital piano and the virtual piano instrument or DAW
+you already use. It reshapes Note On velocity while preserving the rest of the
+MIDI performance, then turns the mapped stream into live feedback, rhythm
+practice, and recoverable recordings.
 
 ![Keyestra mobile remote showing live velocity feedback, rhythm practice, and clip export](demo/screenshots/keyestra-mobile-remote.png)
 
-Leave the computer with the piano setup and use a phone on the same network as
-the remote:
+## Why Keyestra?
 
-- **Perform** — see live velocity, dynamics, chords, and the metronome.
-- **Practice** — run phone-first rhythm rounds with early/late feedback.
-- **Capture** — select, preview, and save a precise section from the rolling
-  MIDI recorder.
+Digital pianos and software instruments do not always agree about how touch
+should translate into dynamics. Keyestra gives you a configurable velocity
+curve without sacrificing sustain, pitch bend, controllers, or other MIDI
+messages.
 
-```text
-Digital piano
-      │
-      ▼
-Keyestra mapper ──► Keyestra MIDI ──► Pianoteq / Reaper / another instrument
-                           │
-                           └────────► Monitor + rolling MIDI recorder
-```
+![Signal flow from a digital piano through Keyestra to virtual piano instruments, a DAW, and the Monitor](docs/keyestra-signal-flow.svg)
 
-> Keyestra does not create virtual MIDI ports. On Windows, create a loopMIDI
-> port named `Keyestra MIDI` before starting it. On macOS, use an IAC Driver
-> port or another existing virtual MIDI port.
+Keyestra includes both the MIDI mapper and the browser-based performance
+companion. The existing virtual port carries the mapped performance to virtual
+piano instruments or DAWs and back into Keyestra's Monitor, rhythm practice,
+and rolling recorder.
 
-## Monitor
-
-![Keyestra Monitor showing generated MIDI performance data](demo/screenshots/keyestra-monitor.png)
-
-The screenshot is from the real Monitor UI. Its sample performance was sent
-through the normal MIDI input and recorder pipeline with:
-
-```powershell
-cargo run --example send_demo_midi
-```
-
-The demo plays a short chord progression across `pp`–`ff`, including sustain,
-so documentation screenshots and manual UI checks are repeatable without a
-physical piano.
+Keyestra does not create virtual MIDI ports. On Windows, create a loopMIDI port
+named `Keyestra MIDI`. On macOS, use an IAC Driver port or another existing
+virtual MIDI port.
 
 ## Highlights
 
-- **Expressive velocity mapping** — piecewise curves or an exact 128-value
-  table reshape only Note On velocities from `1..=127`.
-- **MIDI-safe routing** — Note Off, Note On velocity `0`, sustain, CC, pitch
-  bend, program changes, channel pressure, SysEx, and unknown messages pass
-  through unchanged.
-- **Resilient Windows Tray** — waits for missing ports, reconnects when devices
-  return, supervises the mapper, and remembers the selected curve.
-- **Live performance insight** — shows chords, note velocities, dynamic bands,
-  keyboard range, staff history, raw MIDI, and left/right-hand filtering.
-- **Rolling recorder** — keeps the latest 60 minutes in memory, supports Takes
-  and recent-range saves, offers precise clip selection and preview, and
-  exports standard MIDI files.
-- **Built-in metronome** — controllable from the desktop or mobile Monitor
-  layout without changing the mapped MIDI stream.
-- **Traceable releases** — the Monitor footer, `/version`, deployed directory,
-  and release metadata share the same package version and Git build ID.
+- **Expressive velocity shaping** — use a piecewise curve or an exact 128-value
+  table to match your piano to your preferred instrument.
+- **MIDI-safe routing** — Note Off, sustain, CC, pitch bend, program changes,
+  channel pressure, SysEx, and unknown messages pass through unchanged.
+- **Phone remote** — view dynamics and chords, control the metronome, practice
+  rhythm, and manage recordings without keeping the computer in front of you.
+- **Rolling recorder** — recover the latest performance, mark Takes, select a
+  precise clip, preview it, and export a standard MIDI file.
+- **Resilient Windows Tray** — wait for missing devices, reconnect
+  automatically, supervise the mapper, and remember the selected curve.
 
-## Quick Start
+## Requirements
 
-### 1. Prepare the virtual port
+The complete Tray and deployment workflow is currently Windows-focused. To try
+Keyestra from this repository, you need:
+
+- a digital piano or MIDI keyboard;
+- a virtual MIDI port such as loopMIDI;
+- a software instrument or DAW that can receive the mapped MIDI port; and
+- a Rust toolchain with `cargo`.
+
+For phone access, connect the phone and computer to the same trusted local
+network.
+
+## Quick start from source
+
+### 1. Create the virtual port
 
 Create a virtual MIDI port named:
 
@@ -82,55 +71,81 @@ Create a virtual MIDI port named:
 Keyestra MIDI
 ```
 
-### 2. List available ports
+### 2. Confirm your MIDI port names
 
 ```powershell
 cargo run -- --list
 ```
 
-Port selectors accept either an index or a case-insensitive name substring.
+Port selectors accept either a numeric index or a case-insensitive name
+substring.
 
-### 3. Run the mapper
-
-```powershell
-cargo run -- `
-  --in "Roland FP-10" `
-  --out "Keyestra MIDI" `
-  --curve examples/curve.toml
-```
-
-Useful alternatives:
-
-```powershell
-# Print mapped note activity in the terminal
-cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" `
-  --curve examples/curve.toml --monitor
-
-# Route MIDI without velocity mapping
-cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --bypass
-```
-
-In Reaper or another DAW, enable the mapped `Keyestra MIDI` input. Disable the
-raw piano input for that track or each note may arrive twice.
-
-## Windows Tray App
-
-Build all three applications:
+### 3. Build and start the Windows Tray
 
 ```powershell
 cargo build --release `
   --bin keyestra `
   --bin keyestra-tray `
   --bin keyestra-monitor
+
+.\target\release\keyestra-tray.exe --in "Roland FP-10"
 ```
 
-For local development, start:
+Replace `Roland FP-10` with a distinctive part of your piano's MIDI input name.
+The Tray uses `Keyestra MIDI` as the mapped output and Monitor input.
 
-```powershell
-.\target\release\keyestra-tray.exe
+This runs directly from Cargo output for evaluation. For a permanent
+current-user installation and Windows Startup integration, follow
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+### 4. Connect your instrument or DAW
+
+In Pianoteq, Reaper, or another instrument, enable the mapped `Keyestra MIDI`
+input. Disable the raw piano input for that track, or each note may arrive
+twice.
+
+The Monitor is available on the computer at:
+
+```text
+http://localhost:8770
 ```
 
-The Tray starts the mapper and Monitor with these defaults:
+## Use your phone as the remote
+
+Connect the phone to the same local network as the computer and open:
+
+```text
+http://<computer-ip>:8770
+```
+
+Use `ipconfig` on Windows to find the computer's IPv4 address. No phone app is
+required. If Windows asks for network permission, allow Keyestra only on
+trusted private networks.
+
+The phone layout is organized around three jobs:
+
+- **Perform** — see the current chord, per-note velocity, dynamic range,
+  performance history, and metronome.
+- **Practice** — choose the tempo, notes per beat, and number of rounds, then
+  get immediate early/late feedback and round summaries.
+- **Capture** — mark a Take, save a recent range, or select and preview an exact
+  section before exporting it.
+
+## Daily use from the Tray
+
+Right-click the Tray icon to:
+
+- inspect mapper and Monitor status;
+- start, stop, or restart mapping;
+- switch between the built-in velocity curves;
+- open the Monitor;
+- manage Windows Startup; or
+- exit Keyestra.
+
+If a required MIDI port is missing, the Tray remains available in **Waiting**
+state and starts mapping when the devices return.
+
+The default Tray settings are:
 
 ```text
 input:   Roland Digital Piano
@@ -139,103 +154,56 @@ curve:   examples/curve.toml
 monitor: http://localhost:8770
 ```
 
-Right-click the Tray icon to inspect status, start or stop mapping, restart,
-switch between the built-in curves, open the Monitor, manage Windows Startup,
-or exit.
-
-If a MIDI port is missing at login, the Tray stays available in **Waiting**
-state. It starts mapping when both ports appear, returns to standby if either
-disappears, and reconnects automatically. Unexpected mapper exits use
-exponential retry delays from 5 to 60 seconds; a stable 30-second run resets
-the delay.
-
-## Monitor and Recorder
-
-The Monitor is served locally by `keyestra-monitor` and works in desktop and
-mobile browsers. It provides:
-
-- current chord and per-note velocity;
-- practical `pp`, `p`, `mp`, `mf`, `f`, and `ff` working ranges;
-- staff and velocity-lane performance history;
-- raw MIDI inspection and voice/range filtering;
-- a browser-controlled metronome;
-- a phone-first rhythm practice mode with one-bar count-in, 2/3/4 notes per
-  beat, early/late timing feedback, automatic round summaries, and
-  start/pause/resume/finish controls;
-- a 60-minute rolling MIDI buffer;
-- Take, latest-5-minute, and latest-15-minute saves;
-- a detailed timeline with pan, zoom, overview, range handles, preview, and
-  standard MIDI export;
-- downloads for the 20 most recently saved recordings.
-
-To use a phone as the remote, connect it to the same local network and open
-`http://<computer-ip>:8770`. No phone app is required. If Windows prompts for
-network access, allow Keyestra only on trusted private networks.
-
-### Rhythm practice
+## Rhythm practice
 
 On a phone-width Monitor, **节奏练习** appears above the regular metronome. Set
-the BPM, choose 2, 3, or 4 notes per beat, choose the number of four-beat
-rounds, and start from the phone. The first bar is a count-in and is not scored.
+the BPM, choose 2, 3, or 4 notes per beat, select the number of four-beat
+rounds, and start when ready.
 
-Each Note On or chord onset is matched to the nearest metronome subdivision.
-The live view shows whether the recent attacks are early or late, their median
-offset, timing spread, hit rate, and missed/extra attacks. Completed bars are
-summarized automatically. Pausing preserves completed work and gives another
-one-bar count-in when resumed.
+The first bar is an unscored count-in. During the exercise, the Monitor shows:
 
-Timing analysis runs in the monitor backend using the MIDI callback and the
-metronome audio clock. The phone sends controls and renders results; browser
-network timing is not used for scoring. Chord notes arriving within 52 ms count
-as one attack, and every MIDI message still follows the normal recording and
-monitor pipeline.
+- whether recent attacks are early or late;
+- median timing offset and timing spread;
+- hit rate and missed or extra attacks; and
+- a summary for each completed round.
 
-### Rolling capture and clip export
+Pausing preserves completed work. Resuming begins with another one-bar
+count-in.
+
+## Recording and clip export
 
 ![Keyestra rolling MIDI recorder and clip editor](demo/screenshots/keyestra-recorder.png)
 
-The Recorder continuously buffers mapped MIDI without requiring a recording
-button. You can mark a Take, save the latest 5 or 15 minutes immediately, or
-expand **编辑片段** for a precise export:
+The Recorder continuously keeps the latest 60 minutes of mapped MIDI in memory.
+You can:
 
-- switch the detailed view between 30 seconds, 2 minutes, 5 minutes, or the
-  complete buffer;
-- use the overview to locate activity, then pan and zoom the detailed timeline;
-- drag the selection or its start/end handles and nudge either boundary by
-  `100 ms` or `1 s`;
-- preview the selected range through a chosen MIDI output;
-- save exactly that range as a standard `.mid` file.
+- mark and save a Take;
+- save the latest 5 or 15 minutes immediately;
+- inspect 30-second, 2-minute, 5-minute, or complete-buffer views;
+- pan and zoom the timeline;
+- drag or nudge the selection boundaries;
+- preview the selected range through a MIDI output; and
+- save the selection as a standard `.mid` file.
 
-Recordings are written atomically to:
+Saved recordings are stored in:
 
 ```text
 %APPDATA%\keyestra\recordings
 ```
 
-The recorder retains Note On, Note Off, sustain and other CC messages, pitch
-bend, program changes, channel pressure, and SysEx. MIDI clock, active sensing,
-and other system real-time messages are intentionally omitted from the rolling
-buffer.
+> The rolling buffer is memory-backed. Restarting the Monitor permanently
+> clears unsaved material. Saved `.mid` files remain on disk.
 
-Exports use a fixed high-resolution timing scale without quantizing the
-performance. Sustain-off and all-notes-off messages are appended for every
-used channel to prevent stuck notes during playback.
+Preview temporarily pauses rolling capture so playback returning through the
+virtual port cannot be recorded into the buffer.
 
-The rolling buffer is currently memory-backed. Restarting the Monitor clears
-unsaved material; saved `.mid` files remain on disk. Preview pauses rolling
-capture so playback returning through the virtual port cannot contaminate the
-buffer.
+## Velocity curves
 
-The detailed editor and API design is documented in
-[`docs/RECORDER_PREVIEW_DESIGN.md`](docs/RECORDER_PREVIEW_DESIGN.md).
-
-## Velocity Curves
-
-The default FP-10 curve is [`examples/curve.toml`](examples/curve.toml):
+The default curve is [`examples/curve.toml`](examples/curve.toml):
 
 ```toml
 [input]
-name = "Roland FP-10"
+name = "Roland Digital Piano"
 
 [output]
 name = "Keyestra MIDI"
@@ -253,135 +221,35 @@ points = [
 ]
 ```
 
-Each point is `[input_velocity, output_velocity]`. Keyestra interpolates a
-128-value lookup table at startup. Velocity `0` is always forced to `0`.
+Each point is `[input_velocity, output_velocity]`. Keyestra interpolates the
+points into its velocity lookup table at startup. Velocity `0` is always kept
+at `0`, because Note On with velocity `0` is commonly used as Note Off.
 
-[`examples/curve-mid-control.toml`](examples/curve-mid-control.toml) is a more
-conservative option with extra finger-control room around velocities `50–80`.
-The Tray can switch between both built-in curves and restarts the mapper
-automatically.
+[`examples/curve-mid-control.toml`](examples/curve-mid-control.toml) keeps more
+finger-control room in the middle velocities. The Tray can switch between both
+built-in curves. Exact table mode is demonstrated in
+[`examples/table.toml`](examples/table.toml).
 
-Table mode accepts exactly 128 output values, indexed by input velocity. See
-[`examples/table.toml`](examples/table.toml) for a complete configuration.
+## Advanced CLI use
 
-### Dynamic bands
+The mapper and Monitor can run without the Tray. See
+[`docs/CLI.md`](docs/CLI.md) for port discovery, direct routing, bypass mode,
+terminal monitoring, and Monitor host/port options.
 
-| Dynamic | Center | Working range |
-| --- | ---: | ---: |
-| `pp` | 20 | 12–30 |
-| `p` | 40 | 28–50 |
-| `mp` | 60 | 48–70 |
-| `mf` | 80 | 68–90 |
-| `f` | 100 | 88–110 |
-| `ff` | 120 | 108–127 |
+## Troubleshooting
 
-Neighboring ranges overlap, so boundary values can appear as transitions such
-as `p/mp` instead of flickering between hard labels.
+| Problem | What to check |
+| --- | --- |
+| Tray shows **Waiting** | Confirm that the piano and `Keyestra MIDI` ports exist and that the configured name matches. |
+| Notes play twice | Disable the raw piano input in the instrument or DAW; listen only to `Keyestra MIDI`. |
+| Phone cannot open the Monitor | Confirm both devices are on the same network, use the computer's IPv4 address, and allow access on private networks. |
+| Metronome is silent | Open **Settings** in the Monitor and choose the intended audio output. |
+| An unsaved performance disappeared | Restarting the Monitor clears the memory-backed rolling buffer; saved MIDI files remain in the recordings directory. |
 
-## Windows Deployment
+## Documentation
 
-`target\release` is Cargo output, not an installation directory. Deploy an
-immutable current-user release with:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\deploy-windows.ps1
-```
-
-The script runs formatting and tests, builds all three binaries, publishes
-them under:
-
-```text
-%LOCALAPPDATA%\keyestra\releases\<version>-<build>\
-```
-
-It also writes `%LOCALAPPDATA%\keyestra\current.json` and updates:
-
-```text
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs
-```
-
-Normal deployment does not stop the running release and therefore preserves
-the unsaved recorder buffer. The new release starts at the next login or after
-the current Tray exits.
-
-To deploy and switch immediately:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\deploy-windows.ps1 -Activate
-```
-
-> **Activation stops the running Keyestra processes and permanently discards
-> the unsaved in-memory recorder buffer.**
-
-Release identity makes the source state explicit:
-
-```text
-clean commit:         0.2.0-d137d292
-uncommitted preview:  0.2.0-d137d292-dirty-20260728T231500Z
-Git ID unavailable:   0.2.0-snapshot-20260728T231500Z
-```
-
-The same identity is embedded in the binaries, stored in `current.json`,
-returned by `GET /version`, shown in the Monitor footer, and used for the
-immutable release directory.
-
-### Startup rollback and removal
-
-Point Startup to an earlier installed release without stopping the current
-one:
-
-```powershell
-& "$env:LOCALAPPDATA\keyestra\releases\<old-release>\keyestra-tray.exe" `
-  --install-startup
-```
-
-Remove current-user Startup:
-
-```powershell
-& "$env:LOCALAPPDATA\keyestra\releases\<release>\keyestra-tray.exe" `
-  --uninstall-startup
-```
-
-Tray logs are stored at `%APPDATA%\keyestra\tray.log`, capped at 5 MB, with one
-rotated backup at `tray.log.1`.
-
-## Development
-
-For normal changes:
-
-```powershell
-cargo fmt --check
-cargo test
-```
-
-For changes affecting the Tray, Monitor server, binary identity, or packaging:
-
-```powershell
-cargo build --release `
-  --bin keyestra `
-  --bin keyestra-tray `
-  --bin keyestra-monitor
-```
-
-Regenerate icon assets with:
-
-```powershell
-python .\scripts\generate-icons.py
-```
-
-Brand assets live in [`assets/icons`](assets/icons), including SVG masters,
-transparent PNGs, the runtime Tray RGBA payload, and the multi-resolution
-Windows `.ico`.
-
-## Current Scope
-
-Keyestra already supports MIDI port discovery, name/index selection, velocity
-curves and tables, bypass and terminal-monitor modes, supervised reconnecting
-Tray operation, desktop/mobile performance monitoring, metronome control, and
-rolling MIDI recording with range preview and export.
-
-Useful future work includes a visual curve editor, crash-recoverable rolling
-recording journal, richer practice analytics, and platform-native Tray support
-beyond Windows.
+- [Windows deployment and rollback](docs/DEPLOYMENT.md)
+- [Command-line usage](docs/CLI.md)
+- [Recorder and clip-editor design](docs/RECORDER_PREVIEW_DESIGN.md)
+- [Demo data and screenshot workflow](demo/README.md)
+- [Contributing and validation](CONTRIBUTING.md)
