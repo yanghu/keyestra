@@ -586,10 +586,15 @@ fetchRecorder();
 setInterval(fetchRecorder,1000);
 const clipState={
   sessionId:null, availableStartUs:0, availableEndUs:0, viewStartUs:0, viewEndUs:0,
-  startUs:null, endUs:null, focus:"start", preset:30000000, timeline:null,
-  previewId:null, preview:null, drag:null, loading:false
+  startUs:null, endUs:null, focus:"start", preset:"all", timeline:null, overview:null,
+  previewId:null, preview:null, drag:null, overviewDrag:null, navigation:null,
+  renderedStartUs:0, renderedEndUs:0, follow:false, loading:false, loadTimer:null
 };
 const clipMinimumUs=100000;
+const clipMinimumViewUs=1000000;
+const clipOverviewBins=240;
+const clipDetailBins=600;
+const maximumU64="18446744073709551615";
 async function recorderApi(url, options={}){
   const response=await fetch(url,{cache:"no-store",...options});
   let data={};
@@ -616,6 +621,74 @@ function setClipStatus(message,className=""){
 function clipPercent(us){
   const duration=Math.max(1,clipState.viewEndUs-clipState.viewStartUs);
   return Math.max(0,Math.min(100,(us-clipState.viewStartUs)/duration*100));
+}
+function overviewPercent(us){
+  const duration=Math.max(1,clipState.availableEndUs-clipState.availableStartUs);
+  return Math.max(0,Math.min(100,(us-clipState.availableStartUs)/duration*100));
+}
+function constrainClipView(start,end){
+  const availableStart=clipState.availableStartUs;
+  const availableEnd=clipState.availableEndUs;
+  const total=Math.max(0,availableEnd-availableStart);
+  if(total<=0) return [availableStart,availableEnd];
+  const minimum=Math.min(clipMinimumViewUs,total);
+  let duration=Math.max(minimum,Math.min(total,end-start));
+  start=Math.max(availableStart,Math.min(start,availableEnd-duration));
+  end=start+duration;
+  if(end>availableEnd){
+    end=availableEnd;
+    start=end-duration;
+  }
+  return [Math.round(start),Math.round(end)];
+}
+function setClipView(start,end,{follow=false,preset=null,preview=true}={}){
+  [clipState.viewStartUs,clipState.viewEndUs]=constrainClipView(start,end);
+  clipState.follow=follow;
+  clipState.preset=preset;
+  renderClipNavigation();
+  renderClipSelection();
+  if(preview) previewClipBinsForView();
+}
+function renderClipNavigation(){
+  const total=clipState.availableEndUs-clipState.availableStartUs;
+  const empty=total<=0;
+  $("clipOverview").classList.toggle("empty",empty);
+  $("clipRail").classList.toggle("empty",empty);
+  document.querySelectorAll("[data-clip-view],[data-clip-navigation]").forEach(button=>button.disabled=empty);
+  if(empty){
+    $("clipViewStart").textContent="--";
+    $("clipViewEnd").textContent="--";
+    $("clipFollowStatus").textContent="等待 MIDI";
+    return;
+  }
+  const viewStart=overviewPercent(clipState.viewStartUs);
+  const viewEnd=overviewPercent(clipState.viewEndUs);
+  const selectionStart=overviewPercent(clipState.startUs ?? clipState.viewStartUs);
+  const selectionEnd=overviewPercent(clipState.endUs ?? clipState.viewEndUs);
+  $("clipOverviewViewport").style.left=`${viewStart}%`;
+  $("clipOverviewViewport").style.width=`${Math.max(0,viewEnd-viewStart)}%`;
+  $("clipOverviewSelection").style.left=`${selectionStart}%`;
+  $("clipOverviewSelection").style.width=`${Math.max(0,selectionEnd-selectionStart)}%`;
+  $("clipViewStart").textContent=formatClipTime(clipState.viewStartUs);
+  $("clipViewEnd").textContent=formatClipTime(clipState.viewEndUs);
+  $("clipFollowStatus").textContent=clipState.follow ? "跟随最新" : (clipState.preset==="all" ? "全部缓存" : "浏览缓存");
+  const latestButton=document.querySelector('[data-clip-navigation="latest"]');
+  latestButton.classList.toggle("following",clipState.follow);
+  latestButton.textContent=clipState.follow ? "正在跟随" : "回到最新";
+  document.querySelectorAll("[data-clip-view]").forEach(button=>button.classList.toggle("active",button.dataset.clipView===String(clipState.preset)));
+}
+function previewClipBinsForView(){
+  if(!clipState.renderedEndUs || !$("clipRail").getBoundingClientRect().width) return;
+  const oldDuration=Math.max(1,clipState.renderedEndUs-clipState.renderedStartUs);
+  const newDuration=Math.max(1,clipState.viewEndUs-clipState.viewStartUs);
+  const scale=oldDuration/newDuration;
+  const offset=(clipState.renderedStartUs-clipState.viewStartUs)/newDuration*$("clipRail").getBoundingClientRect().width;
+  $("clipBins").style.transform=`translateX(${offset}px) scaleX(${scale})`;
+  $("clipBins").style.opacity=".68";
+}
+function scheduleClipTimelineLoad(delay=100){
+  clearTimeout(clipState.loadTimer);
+  clipState.loadTimer=setTimeout(()=>loadClipTimeline(),delay);
 }
 function renderClipSelection(){
   if(clipState.startUs==null || clipState.endUs==null) return;
@@ -644,6 +717,7 @@ function renderClipSelection(){
   $("clipPlay").disabled=!hasRange;
   $("clipSave").disabled=!hasRange;
   document.querySelectorAll("[data-clip-nudge]").forEach(button=>button.disabled=!hasRange);
+  renderClipNavigation();
 }
 function renderClipBins(timeline){
   clipState.timeline=timeline;
@@ -655,7 +729,23 @@ function renderClipBins(timeline){
     const opacity=.38+Math.min(.58,density*.42+velocity*.22);
     return `<span class="clip-bin" style="height:${height}%;opacity:${opacity}"></span>`;
   }).join("");
+  clipState.renderedStartUs=timeline.range.startUs;
+  clipState.renderedEndUs=timeline.range.endUs;
+  $("clipBins").style.transform="";
+  $("clipBins").style.opacity="";
   renderClipSelection();
+}
+function renderClipOverview(timeline){
+  clipState.overview=timeline;
+  const maximum=Math.max(1,...timeline.bins.map(bin=>Number(bin.noteOnCount||0)));
+  $("clipOverviewBins").innerHTML=timeline.bins.map(bin=>{
+    const density=Number(bin.noteOnCount||0)/maximum;
+    const velocity=Number(bin.velocityMaximum||0)/127;
+    const height=Math.max(4,Math.round((density*.72+velocity*.28)*92));
+    const opacity=.34+Math.min(.62,density*.44+velocity*.24);
+    return `<span class="clip-overview-bin" style="height:${height}%;opacity:${opacity}"></span>`;
+  }).join("");
+  renderClipNavigation();
 }
 function selectedClipParams(){
   return new URLSearchParams({
@@ -668,28 +758,36 @@ async function loadClipTimeline({reset=false,message=""}={}){
   if(clipState.loading) return;
   clipState.loading=true;
   try{
-    const params=new URLSearchParams({bins:"600",notes:"1"});
-    if(clipState.sessionId && !reset){
-      params.set("sessionId",clipState.sessionId);
-      params.set("startUs",String(Math.round(clipState.viewStartUs)));
-      params.set("endUs",String(Math.round(clipState.viewEndUs)));
-    }
-    const timeline=await recorderApi(`/recorder/timeline?${params}`);
-    const changed=clipState.sessionId && clipState.sessionId!==timeline.sessionId;
-    clipState.sessionId=timeline.sessionId;
-    clipState.availableStartUs=timeline.buffer.availableStartUs;
-    clipState.availableEndUs=timeline.buffer.availableEndUs;
-    clipState.viewStartUs=timeline.range.startUs;
-    clipState.viewEndUs=timeline.range.endUs;
+    const overviewParams=new URLSearchParams({
+      startUs:"0",endUs:maximumU64,bins:String(clipOverviewBins),notes:"0"
+    });
+    const overview=await recorderApi(`/recorder/timeline?${overviewParams}`);
+    const changed=Boolean(clipState.sessionId && clipState.sessionId!==overview.sessionId);
+    clipState.sessionId=overview.sessionId;
+    clipState.availableStartUs=overview.buffer.availableStartUs;
+    clipState.availableEndUs=overview.buffer.availableEndUs;
+    const previousViewDuration=Math.max(clipMinimumViewUs,clipState.viewEndUs-clipState.viewStartUs);
     if(reset || changed || clipState.startUs==null){
-      const take=timeline.take && !timeline.take.recording ? timeline.take : null;
-      clipState.startUs=take?.startUs ?? timeline.range.startUs;
-      clipState.endUs=take?.endUs ?? timeline.range.endUs;
+      clipState.follow=false;
+      clipState.preset="all";
+      clipState.viewStartUs=clipState.availableStartUs;
+      clipState.viewEndUs=clipState.availableEndUs;
+      const take=overview.take && !overview.take.recording ? overview.take : null;
+      clipState.startUs=take?.startUs ?? clipState.viewStartUs;
+      clipState.endUs=take?.endUs ?? clipState.viewEndUs;
+    }else if(clipState.follow){
+      clipState.viewEndUs=clipState.availableEndUs;
+      clipState.viewStartUs=Math.max(clipState.availableStartUs,clipState.viewEndUs-previousViewDuration);
+    }else{
+      [clipState.viewStartUs,clipState.viewEndUs]=constrainClipView(clipState.viewStartUs,clipState.viewEndUs);
     }
     if(clipState.availableEndUs<=clipState.availableStartUs){
       clipState.startUs=clipState.availableStartUs;
       clipState.endUs=clipState.availableEndUs;
-      renderClipBins(timeline);
+      clipState.viewStartUs=clipState.availableStartUs;
+      clipState.viewEndUs=clipState.availableEndUs;
+      renderClipOverview(overview);
+      renderClipBins(overview);
       $("clipEventCount").textContent="0";
       $("clipNoteCount").textContent="0";
       setClipStatus("等待 MIDI 输入后即可选择片段。");
@@ -704,6 +802,17 @@ async function loadClipTimeline({reset=false,message=""}={}){
     if(clipState.endUs-clipState.startUs<clipMinimumUs){
       clipState.endUs=Math.min(clipState.availableEndUs,clipState.startUs+clipMinimumUs);
     }
+    const detailParams=new URLSearchParams({
+      sessionId:clipState.sessionId,
+      startUs:String(Math.round(clipState.viewStartUs)),
+      endUs:String(Math.round(clipState.viewEndUs)),
+      bins:String(clipDetailBins),
+      notes:"1"
+    });
+    const timeline=await recorderApi(`/recorder/timeline?${detailParams}`);
+    clipState.viewStartUs=timeline.range.startUs;
+    clipState.viewEndUs=timeline.range.endUs;
+    renderClipOverview(overview);
     renderClipBins(timeline);
     await refreshClipStats();
     if(changed) setClipStatus("Monitor 已重启，旧选择已清除。","error");
@@ -758,10 +867,13 @@ function constrainClipSelection(start,end){
 function beginClipDrag(event,type){
   if(clipState.startUs==null) return;
   stopClipPreview(true);
+  clipState.follow=false;
+  clipState.preset=null;
   event.currentTarget.setPointerCapture(event.pointerId);
   clipState.drag={type,pointerId:event.pointerId,x:event.clientX,startUs:clipState.startUs,endUs:clipState.endUs};
   if(type==="start" || type==="end") clipState.focus=type;
   renderClipSelection();
+  if(event.pointerType!=="touch") event.stopPropagation();
   event.preventDefault();
 }
 function moveClipDrag(event){
@@ -775,8 +887,12 @@ function moveClipDrag(event){
   else {
     const duration=end-start;
     start+=delta; end+=delta;
-    if(start<clipState.viewStartUs){ start=clipState.viewStartUs; end=start+duration; }
-    if(end>clipState.viewEndUs){ end=clipState.viewEndUs; start=end-duration; }
+    if(start<clipState.availableStartUs){ start=clipState.availableStartUs; end=start+duration; }
+    if(end>clipState.availableEndUs){ end=clipState.availableEndUs; start=end-duration; }
+    clipState.startUs=Math.round(start);
+    clipState.endUs=Math.round(end);
+    renderClipSelection();
+    return;
   }
   [clipState.startUs,clipState.endUs]=constrainClipSelection(start,end);
   renderClipSelection();
@@ -793,6 +909,160 @@ $("clipSelection").addEventListener("pointerdown",event=>beginClipDrag(event,"re
   element.addEventListener("pointermove",moveClipDrag);
   element.addEventListener("pointerup",endClipDrag);
   element.addEventListener("pointercancel",endClipDrag);
+});
+function beginClipNavigation(event){
+  if(clipState.availableEndUs<=clipState.availableStartUs) return;
+  const editingTarget=Boolean(event.target.closest(".clip-handle,.clip-selection"));
+  if(!editingTarget) $("clipRail").setPointerCapture(event.pointerId);
+  if(!clipState.navigation){
+    clipState.navigation={pointers:new Map(),mode:"pan"};
+  }
+  const navigation=clipState.navigation;
+  navigation.pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  clipState.follow=false;
+  clipState.preset=null;
+  if(navigation.pointers.size===1){
+    navigation.mode=editingTarget ? "edit" : "pan";
+    navigation.startX=event.clientX;
+    navigation.startViewStartUs=clipState.viewStartUs;
+    navigation.startViewEndUs=clipState.viewEndUs;
+  }else if(navigation.pointers.size===2){
+    clipState.drag=null;
+    const points=[...navigation.pointers.values()];
+    const rect=$("clipRail").getBoundingClientRect();
+    navigation.mode="pinch";
+    navigation.startDistance=Math.max(1,Math.hypot(points[1].x-points[0].x,points[1].y-points[0].y));
+    navigation.startDuration=clipState.viewEndUs-clipState.viewStartUs;
+    navigation.anchorUs=clipState.viewStartUs+(((points[0].x+points[1].x)/2-rect.left)/Math.max(1,rect.width))*navigation.startDuration;
+  }
+  $("clipRail").classList.add("navigating");
+  event.preventDefault();
+}
+function moveClipNavigation(event){
+  const navigation=clipState.navigation;
+  if(!navigation || !navigation.pointers.has(event.pointerId)) return;
+  navigation.pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  const rect=$("clipRail").getBoundingClientRect();
+  const width=Math.max(1,rect.width);
+  if(navigation.mode==="pinch" && navigation.pointers.size>=2){
+    const points=[...navigation.pointers.values()].slice(0,2);
+    const distance=Math.max(1,Math.hypot(points[1].x-points[0].x,points[1].y-points[0].y));
+    const centerX=(points[0].x+points[1].x)/2;
+    const total=clipState.availableEndUs-clipState.availableStartUs;
+    const duration=Math.max(Math.min(clipMinimumViewUs,total),Math.min(total,navigation.startDuration*navigation.startDistance/distance));
+    const fraction=Math.max(0,Math.min(1,(centerX-rect.left)/width));
+    const start=navigation.anchorUs-fraction*duration;
+    setClipView(start,start+duration,{preview:true});
+  }else if(navigation.mode==="pan" && navigation.pointers.size===1){
+    const duration=navigation.startViewEndUs-navigation.startViewStartUs;
+    const delta=-(event.clientX-navigation.startX)/width*duration;
+    setClipView(navigation.startViewStartUs+delta,navigation.startViewEndUs+delta,{preview:true});
+  }
+  event.preventDefault();
+}
+function endClipNavigation(event){
+  const navigation=clipState.navigation;
+  if(!navigation || !navigation.pointers.has(event.pointerId)) return;
+  navigation.pointers.delete(event.pointerId);
+  if(navigation.pointers.size===1){
+    const remaining=[...navigation.pointers.values()][0];
+    navigation.mode="pan";
+    navigation.startX=remaining.x;
+    navigation.startViewStartUs=clipState.viewStartUs;
+    navigation.startViewEndUs=clipState.viewEndUs;
+  }else if(navigation.pointers.size===0){
+    clipState.navigation=null;
+    $("clipRail").classList.remove("navigating");
+    scheduleClipTimelineLoad(0);
+  }
+}
+$("clipRail").addEventListener("pointerdown",beginClipNavigation);
+$("clipRail").addEventListener("pointermove",moveClipNavigation);
+$("clipRail").addEventListener("pointerup",endClipNavigation);
+$("clipRail").addEventListener("pointercancel",endClipNavigation);
+function zoomClipView(factor,anchorUs=(clipState.viewStartUs+clipState.viewEndUs)/2){
+  const oldDuration=clipState.viewEndUs-clipState.viewStartUs;
+  const newDuration=oldDuration*factor;
+  const fraction=oldDuration>0 ? (anchorUs-clipState.viewStartUs)/oldDuration : .5;
+  const start=anchorUs-fraction*newDuration;
+  setClipView(start,start+newDuration,{preview:true});
+}
+$("clipRail").addEventListener("wheel",event=>{
+  if(!(event.ctrlKey || event.metaKey)) return;
+  const rect=$("clipRail").getBoundingClientRect();
+  const fraction=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width)));
+  const anchor=clipState.viewStartUs+fraction*(clipState.viewEndUs-clipState.viewStartUs);
+  clipState.follow=false;
+  clipState.preset=null;
+  zoomClipView(Math.exp(event.deltaY*.002),anchor);
+  scheduleClipTimelineLoad();
+  event.preventDefault();
+},{passive:false});
+$("clipRail").addEventListener("keydown",event=>{
+  if(!["+", "=", "-", "_", "Home"].includes(event.key)) return;
+  if(event.key==="Home"){
+    clipState.follow=true;
+    clipState.preset=null;
+    const duration=Math.min(120000000,clipState.availableEndUs-clipState.availableStartUs);
+    setClipView(clipState.availableEndUs-duration,clipState.availableEndUs,{follow:true,preview:true});
+  }else{
+    clipState.follow=false;
+    clipState.preset=null;
+    zoomClipView(["+","="].includes(event.key) ? .5 : 2);
+  }
+  scheduleClipTimelineLoad(0);
+  event.preventDefault();
+});
+function beginOverviewDrag(event,type){
+  if(clipState.availableEndUs<=clipState.availableStartUs) return;
+  stopClipPreview(true);
+  event.currentTarget.setPointerCapture(event.pointerId);
+  clipState.follow=false;
+  clipState.preset=null;
+  clipState.overviewDrag={
+    type,pointerId:event.pointerId,x:event.clientX,
+    startUs:clipState.viewStartUs,endUs:clipState.viewEndUs
+  };
+  event.stopPropagation();
+  event.preventDefault();
+}
+function moveOverviewDrag(event){
+  const drag=clipState.overviewDrag;
+  if(!drag || drag.pointerId!==event.pointerId) return;
+  const width=Math.max(1,$("clipOverview").getBoundingClientRect().width);
+  const total=clipState.availableEndUs-clipState.availableStartUs;
+  const delta=(event.clientX-drag.x)/width*total;
+  let start=drag.startUs,end=drag.endUs;
+  if(drag.type==="start") start=Math.min(end-clipMinimumViewUs,start+delta);
+  else if(drag.type==="end") end=Math.max(start+clipMinimumViewUs,end+delta);
+  else { start+=delta; end+=delta; }
+  setClipView(start,end,{preview:true});
+  event.preventDefault();
+}
+function endOverviewDrag(event){
+  if(!clipState.overviewDrag || clipState.overviewDrag.pointerId!==event.pointerId) return;
+  clipState.overviewDrag=null;
+  scheduleClipTimelineLoad(0);
+}
+$("clipOverviewViewport").addEventListener("pointerdown",event=>beginOverviewDrag(event,"move"));
+$("clipOverviewStartHandle").addEventListener("pointerdown",event=>beginOverviewDrag(event,"start"));
+$("clipOverviewEndHandle").addEventListener("pointerdown",event=>beginOverviewDrag(event,"end"));
+[$("clipOverviewViewport"),$("clipOverviewStartHandle"),$("clipOverviewEndHandle")].forEach(element=>{
+  element.addEventListener("pointermove",moveOverviewDrag);
+  element.addEventListener("pointerup",endOverviewDrag);
+  element.addEventListener("pointercancel",endOverviewDrag);
+});
+$("clipOverview").addEventListener("pointerdown",event=>{
+  if(event.target!==$("clipOverview") && event.target!==$("clipOverviewBins")) return;
+  const rect=$("clipOverview").getBoundingClientRect();
+  const fraction=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width)));
+  const center=clipState.availableStartUs+fraction*(clipState.availableEndUs-clipState.availableStartUs);
+  const duration=clipState.viewEndUs-clipState.viewStartUs;
+  clipState.follow=false;
+  clipState.preset=null;
+  setClipView(center-duration/2,center+duration/2,{preview:true});
+  scheduleClipTimelineLoad(0);
+  event.preventDefault();
 });
 function nudgeClipBoundary(delta){
   if(clipState.startUs==null) return;
@@ -821,10 +1091,27 @@ document.querySelectorAll("[data-clip-view]").forEach(button=>button.addEventLis
   const value=button.dataset.clipView;
   const duration=value==="all" ? clipState.availableEndUs-clipState.availableStartUs : Number(value);
   clipState.preset=value;
-  clipState.viewEndUs=clipState.availableEndUs;
-  clipState.viewStartUs=Math.max(clipState.availableStartUs,clipState.viewEndUs-duration);
-  document.querySelectorAll("[data-clip-view]").forEach(item=>item.classList.toggle("active",item===button));
+  clipState.follow=false;
+  setClipView(clipState.availableEndUs-duration,clipState.availableEndUs,{preset:value,preview:true});
   await loadClipTimeline({message:"时间轴范围已更新。"});
+}));
+document.querySelectorAll("[data-clip-navigation]").forEach(button=>button.addEventListener("click",async()=>{
+  if(!clipState.sessionId) return;
+  stopClipPreview(true);
+  const action=button.dataset.clipNavigation;
+  if(action==="latest"){
+    const total=clipState.availableEndUs-clipState.availableStartUs;
+    const current=clipState.viewEndUs-clipState.viewStartUs;
+    const duration=Math.min(total,clipState.preset==="all" ? 120000000 : Math.max(clipMinimumViewUs,current));
+    setClipView(clipState.availableEndUs-duration,clipState.availableEndUs,{follow:true,preview:true});
+  }else if(action==="fit-selection"){
+    const duration=Math.max(clipMinimumViewUs,clipState.endUs-clipState.startUs);
+    const padding=duration*.08;
+    setClipView(clipState.startUs-padding,clipState.endUs+padding,{preview:true});
+  }else{
+    zoomClipView(action==="zoom-in" ? .5 : 2);
+  }
+  await loadClipTimeline({message:action==="latest" ? "正在跟随最新 MIDI。" : "时间轴范围已更新。"});
 }));
 $("clipPlay").addEventListener("click",async()=>{
   if(!clipState.sessionId) return;

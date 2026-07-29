@@ -52,7 +52,30 @@
               <option value="FP10 Mapped">FP10 Mapped</option>
             </select>
           </div>
-          <div class="clip-rail" id="clipRail" aria-label="MIDI 活动时间轴">
+          <div class="clip-navigation" role="group" aria-label="时间轴导航">
+            <button type="button" data-clip-navigation="zoom-out" aria-label="缩小时间轴">−</button>
+            <button type="button" data-clip-navigation="zoom-in" aria-label="放大时间轴">＋</button>
+            <button type="button" data-clip-navigation="fit-selection">适合选区</button>
+            <button type="button" data-clip-navigation="latest">回到最新</button>
+          </div>
+          <div class="clip-overview" id="clipOverview" aria-label="完整 MIDI 缓存概览">
+            <div class="clip-overview-bins" id="clipOverviewBins"></div>
+            <div class="clip-overview-selection" id="clipOverviewSelection"></div>
+            <div class="clip-overview-viewport" id="clipOverviewViewport">
+              <button type="button" class="clip-overview-handle clip-overview-handle-start"
+                id="clipOverviewStartHandle" aria-label="调整可见范围开始"></button>
+              <span class="clip-overview-grip" aria-hidden="true"></span>
+              <button type="button" class="clip-overview-handle clip-overview-handle-end"
+                id="clipOverviewEndHandle" aria-label="调整可见范围结束"></button>
+            </div>
+          </div>
+          <div class="clip-view-readout">
+            <span id="clipViewStart">--</span>
+            <strong id="clipFollowStatus">全部缓存</strong>
+            <span id="clipViewEnd">--</span>
+          </div>
+          <div class="clip-rail" id="clipRail" tabindex="0"
+            aria-label="MIDI 活动详细时间轴。拖动空白处平移，双指捏合缩放。">
             <div class="clip-bins" id="clipBins"></div>
             <div class="clip-outside clip-outside-start" id="clipOutsideStart"></div>
             <div class="clip-outside clip-outside-end" id="clipOutsideEnd"></div>

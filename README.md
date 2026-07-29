@@ -191,6 +191,11 @@ Open the monitor page from the tray menu on a computer or phone to:
 - Save the latest 5 or 15 minutes without having started a take first.
 - Expand **编辑片段** to inspect the activity timeline, select an exact range
   with touch-friendly handles, and fine-adjust either boundary.
+- Use the full-buffer overview to pan or resize the detailed viewport. On the
+  detail timeline, drag to pan, pinch (or Ctrl/Cmd-wheel) to zoom, fit the
+  current selection, or return to a live-following view. Starting Follow from
+  the full-buffer view uses a two-minute window; otherwise it preserves the
+  current zoom level.
 - Preview that prepared range through the computer's MIDI sound source and save
   the same range as a standard MIDI file.
 - Download any of the 20 most recently saved `.mid` files.
