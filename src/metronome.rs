@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -38,7 +38,9 @@ struct MetronomeState {
     active_device: Option<String>,
     error: Option<String>,
     started_at_ms: Option<u128>,
+    started_at: Option<Instant>,
     stream_generation: u64,
+    timing_generation: u64,
 }
 
 #[derive(Debug)]
@@ -53,6 +55,19 @@ pub struct MetronomePatch {
 
 pub struct Metronome {
     state: Arc<Mutex<MetronomeState>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GridTiming {
+    pub generation: u64,
+    pub grid_index: u64,
+    pub nearest_grid_index: u64,
+    pub error_ms: f64,
+    pub phase_ms: f64,
+    pub interval_ms: f64,
+    pub bpm: u16,
+    pub beats_per_bar: u8,
+    pub subdivision: u8,
 }
 
 #[derive(Debug, Default)]
@@ -76,7 +91,9 @@ impl Metronome {
             active_device: None,
             error: None,
             started_at_ms: None,
+            started_at: None,
             stream_generation: 1,
+            timing_generation: 0,
         }));
         start_audio_thread(Arc::clone(&state));
         Self { state }
@@ -86,20 +103,25 @@ impl Metronome {
         if let Ok(mut state) = self.state.lock() {
             if let Some(running) = patch.running {
                 if running && !state.settings.running {
-                    state.started_at_ms = Some(now_ms());
+                    state.started_at_ms = None;
+                    state.started_at = None;
                     state.current_beat = 0;
                     state.current_subdivision = 0;
+                    state.stream_generation = state.stream_generation.wrapping_add(1);
                 } else if !running {
                     state.started_at_ms = None;
+                    state.started_at = None;
                     state.current_beat = 0;
                     state.current_subdivision = 0;
+                    state.stream_generation = state.stream_generation.wrapping_add(1);
                 }
                 state.settings.running = running;
             }
             if let Some(bpm) = patch.bpm {
                 state.settings.bpm = bpm.clamp(30, 240);
                 if state.settings.running {
-                    state.started_at_ms = Some(now_ms());
+                    state.started_at_ms = None;
+                    state.started_at = None;
                     state.current_beat = 0;
                     state.current_subdivision = 0;
                     state.stream_generation = state.stream_generation.wrapping_add(1);
@@ -108,7 +130,8 @@ impl Metronome {
             if let Some(beats_per_bar) = patch.beats_per_bar {
                 state.settings.beats_per_bar = beats_per_bar.clamp(1, 12);
                 if state.settings.running {
-                    state.started_at_ms = Some(now_ms());
+                    state.started_at_ms = None;
+                    state.started_at = None;
                     state.current_beat = 0;
                     state.current_subdivision = 0;
                     state.stream_generation = state.stream_generation.wrapping_add(1);
@@ -117,7 +140,8 @@ impl Metronome {
             if let Some(subdivision) = patch.subdivision {
                 state.settings.subdivision = subdivision.clamp(1, 4);
                 if state.settings.running {
-                    state.started_at_ms = Some(now_ms());
+                    state.started_at_ms = None;
+                    state.started_at = None;
                     state.current_beat = 0;
                     state.current_subdivision = 0;
                     state.stream_generation = state.stream_generation.wrapping_add(1);
@@ -153,6 +177,31 @@ impl Metronome {
             .map(|state| state_json(&state, true, false))
             .unwrap_or_else(|_| "{\"error\":\"metronome state lock poisoned\"}".to_string())
     }
+
+    pub fn grid_timing(&self, at: Instant) -> Option<GridTiming> {
+        let state = self.state.lock().ok()?;
+        if !state.settings.running {
+            return None;
+        }
+        let started_at = state.started_at?;
+        let elapsed = at.checked_duration_since(started_at)?.as_secs_f64();
+        let subdivision = state.settings.subdivision.max(1);
+        let interval_ms = 60_000.0 / state.settings.bpm.max(1) as f64 / subdivision as f64;
+        let position = elapsed * 1_000.0 / interval_ms;
+        let grid_index = position.floor().max(0.0) as u64;
+        let nearest_grid_index = position.round().max(0.0) as u64;
+        Some(GridTiming {
+            generation: state.timing_generation,
+            grid_index,
+            nearest_grid_index,
+            error_ms: (position - nearest_grid_index as f64) * interval_ms,
+            phase_ms: (position - grid_index as f64) * interval_ms,
+            interval_ms,
+            bpm: state.settings.bpm,
+            beats_per_bar: state.settings.beats_per_bar,
+            subdivision,
+        })
+    }
 }
 
 fn start_audio_thread(state: Arc<Mutex<MetronomeState>>) {
@@ -171,6 +220,7 @@ fn start_audio_thread(state: Arc<Mutex<MetronomeState>>) {
                         state.current_beat = 0;
                         state.current_subdivision = 0;
                         state.started_at_ms = None;
+                        state.started_at = None;
                     }
                 }
                 seen_generation = generation;
@@ -306,6 +356,11 @@ fn write_samples<T: MeterSample>(
         playback.next_beat = 0;
         playback.next_subdivision = 0;
         playback.was_running = true;
+        if let Ok(mut state) = shared.lock() {
+            state.started_at = Some(Instant::now());
+            state.started_at_ms = Some(now_ms());
+            state.timing_generation = state.timing_generation.wrapping_add(1);
+        }
     }
 
     let frames_per_click =
@@ -457,4 +512,51 @@ fn write_json_string(out: &mut String, value: &str) {
         }
     }
     out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn running_metronome(started_at: Instant) -> Metronome {
+        Metronome {
+            state: Arc::new(Mutex::new(MetronomeState {
+                settings: MetronomeSettings {
+                    running: true,
+                    bpm: 120,
+                    beats_per_bar: 4,
+                    subdivision: 2,
+                    volume: 0.35,
+                    output_device: None,
+                },
+                current_beat: 0,
+                current_subdivision: 0,
+                devices: Vec::new(),
+                active_device: None,
+                error: None,
+                started_at_ms: Some(0),
+                started_at: Some(started_at),
+                stream_generation: 1,
+                timing_generation: 9,
+            })),
+        }
+    }
+
+    #[test]
+    fn grid_timing_uses_negative_for_early_and_positive_for_late() {
+        let started_at = Instant::now();
+        let metronome = running_metronome(started_at);
+
+        let early = metronome
+            .grid_timing(started_at + Duration::from_millis(225))
+            .unwrap();
+        assert_eq!(early.nearest_grid_index, 1);
+        assert!((early.error_ms + 25.0).abs() < 0.001);
+
+        let late = metronome
+            .grid_timing(started_at + Duration::from_millis(275))
+            .unwrap();
+        assert_eq!(late.nearest_grid_index, 1);
+        assert!((late.error_ms - 25.0).abs() < 0.001);
+    }
 }

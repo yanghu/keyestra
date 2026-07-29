@@ -128,6 +128,58 @@
       </details>
     </section>
     <section class="mobile-practice" aria-label="移动端练琴反馈">
+      <section class="mobile-panel rhythm-practice-panel" aria-label="节奏练习">
+        <div class="mobile-panel-head">
+          <div>
+            <h2>节奏练习</h2>
+            <span id="practiceStatus">准备开始</span>
+          </div>
+          <strong id="practiceRound">--</strong>
+        </div>
+        <div class="rhythm-feedback">
+          <div>
+            <strong id="practiceFeedback">跟着节拍器每格弹一下</strong>
+            <span id="practiceFeedbackDetail">开始后先听一小节预备拍</span>
+          </div>
+          <b id="practiceBias">--</b>
+        </div>
+        <div class="rhythm-lane" id="practiceLane" aria-label="最近节奏落点">
+          <div class="mobile-empty">尚无节奏数据</div>
+        </div>
+        <div class="rhythm-stats">
+          <div><strong id="practiceHitRate">--</strong><span>命中</span></div>
+          <div><strong id="practiceSpread">--</strong><span>稳定范围</span></div>
+          <div><strong id="practiceMissed">--</strong><span>漏 / 多</span></div>
+        </div>
+        <div class="rhythm-progress"><span id="practiceProgress"></span></div>
+        <div class="rhythm-rounds" id="practiceRounds" aria-label="每轮命中率"></div>
+        <div class="rhythm-settings">
+          <label>BPM
+            <input id="practiceBpm" type="number" min="30" max="240" step="1" value="80">
+          </label>
+          <label>每拍
+            <select id="practiceSubdivision">
+              <option value="2" selected>2 下</option>
+              <option value="3">3 下</option>
+              <option value="4">4 下</option>
+            </select>
+          </label>
+          <label>轮数
+            <select id="practiceTargetRounds">
+              <option value="4">4 轮</option>
+              <option value="8">8 轮</option>
+              <option value="12" selected>12 轮</option>
+              <option value="16">16 轮</option>
+            </select>
+          </label>
+        </div>
+        <div class="rhythm-actions">
+          <button type="button" id="practicePrimary">开始练习</button>
+          <button type="button" id="practiceFinish" disabled>结束并总结</button>
+          <button type="button" id="practiceReset">清空</button>
+        </div>
+        <div class="rhythm-message" id="practiceMessage"></div>
+      </section>
       <section class="mobile-hero">
         <div>
           <div class="mobile-label">当前反馈</div>

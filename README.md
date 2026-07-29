@@ -152,11 +152,32 @@ mobile browsers. It provides:
 - staff and velocity-lane performance history;
 - raw MIDI inspection and voice/range filtering;
 - a browser-controlled metronome;
+- a phone-first rhythm practice mode with one-bar count-in, 2/3/4 notes per
+  beat, early/late timing feedback, automatic round summaries, and
+  start/pause/resume/finish controls;
 - a 60-minute rolling MIDI buffer;
 - Take, latest-5-minute, and latest-15-minute saves;
 - a detailed timeline with pan, zoom, overview, range handles, preview, and
   standard MIDI export;
 - downloads for the 20 most recently saved recordings.
+
+### Rhythm practice
+
+On a phone-width Monitor, **节奏练习** appears above the regular metronome. Set
+the BPM, choose 2, 3, or 4 notes per beat, choose the number of four-beat
+rounds, and start from the phone. The first bar is a count-in and is not scored.
+
+Each Note On or chord onset is matched to the nearest metronome subdivision.
+The live view shows whether the recent attacks are early or late, their median
+offset, timing spread, hit rate, and missed/extra attacks. Completed bars are
+summarized automatically. Pausing preserves completed work and gives another
+one-bar count-in when resumed.
+
+Timing analysis runs in the monitor backend using the MIDI callback and the
+metronome audio clock. The phone sends controls and renders results; browser
+network timing is not used for scoring. Chord notes arriving within 52 ms count
+as one attack, and every MIDI message still follows the normal recording and
+monitor pipeline.
 
 ### Rolling capture and clip export
 

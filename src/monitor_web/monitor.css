@@ -203,7 +203,8 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .recorder-file { grid-template-columns:minmax(100px,1fr) auto; }
   .recorder-file small { display:none; }
   .grid,.timeline,.lower { display:none; }
-  .mobile-practice { display:grid; gap:8px; }
+  .mobile-practice { display:grid; gap:8px; order:-3; }
+  .mobile-practice > .rhythm-practice-panel { order:-2; }
   .mobile-practice > .metronome-panel { order:-1; }
   .mobile-hero,.mobile-panel,.mobile-details { border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:none; }
   .mobile-hero { min-height:104px; display:grid; grid-template-columns:1fr auto; align-items:end; gap:10px; padding:12px; }
@@ -218,6 +219,35 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .mobile-panel-head h2 { margin:0 0 2px; font-size:15px; }
   .mobile-panel-head strong { color:var(--accent); font-size:24px; line-height:1; }
   .mobile-clear { height:26px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--accent); padding:0 8px; font:inherit; font-size:12px; font-weight:800; }
+  .rhythm-feedback { min-height:64px; display:flex; align-items:end; justify-content:space-between; gap:10px; padding:9px 10px; border-radius:8px; background:var(--soft); }
+  .rhythm-feedback strong { display:block; font-size:20px; line-height:1.1; }
+  .rhythm-feedback span { display:block; margin-top:4px; color:var(--muted); font-size:12px; font-weight:700; }
+  .rhythm-feedback b { flex:0 0 auto; color:var(--accent); font-size:27px; line-height:1; font-variant-numeric:tabular-nums; }
+  .rhythm-lane { min-height:74px; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(30px,1fr); align-items:stretch; gap:3px; margin-top:8px; overflow:hidden; }
+  .rhythm-slot { position:relative; min-width:0; border-radius:6px; background:#f5f7f5; overflow:hidden; }
+  .rhythm-slot::before { content:""; position:absolute; left:50%; top:8px; bottom:18px; width:1px; background:var(--line); }
+  .rhythm-slot i { position:absolute; top:20px; left:clamp(7px,calc(50% + var(--rhythm-offset)),calc(100% - 7px)); width:12px; height:12px; transform:translateX(-50%); border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px #fff; }
+  .rhythm-slot.early i { background:var(--pp); }
+  .rhythm-slot.late i { background:var(--red); }
+  .rhythm-slot em { position:absolute; left:0; right:0; bottom:3px; overflow:hidden; color:var(--muted); font-size:9px; font-style:normal; font-weight:800; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
+  .rhythm-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; text-align:center; }
+  .rhythm-stats div { padding:7px 4px; border:1px solid var(--line); border-radius:7px; }
+  .rhythm-stats strong,.rhythm-stats span { display:block; }
+  .rhythm-stats strong { font-size:16px; font-variant-numeric:tabular-nums; }
+  .rhythm-stats span { margin-top:2px; font-size:10px; }
+  .rhythm-progress { height:7px; margin-top:8px; overflow:hidden; border-radius:999px; background:var(--soft); }
+  .rhythm-progress span { display:block; width:0; height:100%; border-radius:inherit; background:var(--accent); transition:width .18s ease; }
+  .rhythm-rounds { height:38px; display:flex; align-items:end; gap:3px; margin-top:6px; }
+  .rhythm-rounds span { flex:1 1 0; min-width:3px; max-width:24px; border-radius:3px 3px 0 0; background:var(--accent); opacity:.78; }
+  .rhythm-settings { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:8px; }
+  .rhythm-settings label { display:grid; gap:3px; color:var(--muted); font-size:10px; font-weight:800; }
+  .rhythm-settings input,.rhythm-settings select { width:100%; min-width:0; height:34px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); padding:0 7px; font:inherit; font-size:13px; font-weight:800; }
+  .rhythm-settings input:disabled,.rhythm-settings select:disabled { opacity:.55; }
+  .rhythm-actions { display:grid; grid-template-columns:1.2fr 1.2fr .7fr; gap:6px; margin-top:8px; }
+  .rhythm-actions button { min-height:40px; border:1px solid var(--accent); border-radius:8px; background:#fff; color:var(--accent); padding:5px; font:inherit; font-size:12px; font-weight:850; }
+  .rhythm-actions button:first-child { background:var(--accent); color:#fff; }
+  .rhythm-actions button:disabled { opacity:.42; }
+  .rhythm-message { min-height:16px; margin-top:4px; color:var(--red); font-size:11px; font-weight:750; }
   .mobile-filter { padding-bottom:8px; }
   .mobile-filter .mobile-panel-head { align-items:center; margin-bottom:7px; }
   .mobile-filter .split-select { height:28px; max-width:116px; font-size:12px; font-weight:750; }

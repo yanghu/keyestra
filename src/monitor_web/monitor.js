@@ -517,6 +517,120 @@ document.querySelectorAll(".metronome-volume").forEach(input=>input.addEventList
 document.querySelectorAll(".metronome-output").forEach(select=>select.addEventListener("change",()=>updateMetronome({outputDevice:select.value})));
 fetchMetronome();
 connectMetronomeEvents();
+let practiceState = null;
+let practiceBusy = false;
+let practiceFormInitialized = false;
+function practiceIsActive(practice){
+  return ["countIn","running","paused"].includes(practice?.status);
+}
+function signedMilliseconds(value){
+  const number=Number(value || 0);
+  if(Math.abs(number)<0.05) return "0 ms";
+  return `${number>0?"+":""}${number.toFixed(1)} ms`;
+}
+function renderPractice(practice){
+  practiceState=practice;
+  const active=practiceIsActive(practice);
+  const running=["countIn","running"].includes(practice.status);
+  const settings=practice.settings || {};
+  const feedback=practice.feedback || {};
+  const statusText={
+    idle:"准备开始",
+    countIn:`预备拍 · 还剩 ${practice.countInRemaining || 0} 格`,
+    running:"正在练习",
+    paused:"已暂停 · 继续时会先给一小节预备拍",
+    complete:"本轮完成"
+  }[practice.status] || "状态未知";
+  $("practiceStatus").textContent=statusText;
+  $("practiceRound").textContent=practice.currentRound
+    ? `${practice.currentRound}/${settings.targetRounds || 12}`
+    : "--";
+  $("practiceFeedback").textContent=practice.status==="countIn" ? "先听一小节" : feedback.label || "等待输入";
+  $("practiceFeedbackDetail").textContent=practice.status==="countIn"
+    ? "预备拍不计入成绩"
+    : feedback.detail || "跟着节拍器每格弹一下";
+  const hasHits=(practice.recent || []).some(hit=>!hit.extra);
+  $("practiceBias").textContent=hasHits ? signedMilliseconds(feedback.biasMs) : "--";
+  $("practiceHitRate").textContent=practice.completedRounds || hasHits ? `${feedback.hitRate || 0}%` : "--";
+  $("practiceSpread").textContent=hasHits ? `${Number(feedback.spreadMs || 0).toFixed(1)} ms` : "--";
+  $("practiceMissed").textContent=practice.completedRounds || hasHits ? `${feedback.missed || 0} / ${feedback.extras || 0}` : "--";
+  const progress=(Number(practice.completedRounds || 0)/Math.max(1,Number(settings.targetRounds || 12)))*100;
+  $("practiceProgress").style.width=`${Math.min(100,progress)}%`;
+  const recent=(practice.recent || []).filter(hit=>!hit.extra).slice(0,12).reverse();
+  $("practiceLane").innerHTML=recent.length ? recent.map(hit=>{
+    const error=Number(hit.errorMs || 0);
+    const timingClass=error < -12 ? "early" : error > 12 ? "late" : "on-time";
+    const offset=Math.max(-18,Math.min(18,error*.35));
+    return `<div class="rhythm-slot ${timingClass}" style="--rhythm-offset:${offset}px"><i></i><em>${signedMilliseconds(error).replace(" ms","")}</em></div>`;
+  }).join("") : `<div class="mobile-empty">尚无节奏数据</div>`;
+  $("practiceRounds").innerHTML=(practice.rounds || []).map(round=>
+    `<span style="height:${Math.max(4,Number(round.hitRate || 0))}%" title="第 ${round.round} 轮 · ${round.hitRate}%"></span>`
+  ).join("");
+  [$("practiceBpm"),$("practiceSubdivision"),$("practiceTargetRounds")].forEach(control=>{ control.disabled=active || practiceBusy; });
+  if(!practiceFormInitialized || active){
+    $("practiceBpm").value=settings.bpm || $("practiceBpm").value || 80;
+    $("practiceSubdivision").value=String(settings.subdivision || $("practiceSubdivision").value || 2);
+    $("practiceTargetRounds").value=String(settings.targetRounds || $("practiceTargetRounds").value || 12);
+    practiceFormInitialized=true;
+  }
+  $("practicePrimary").textContent=practice.status==="paused"
+    ? "继续练习"
+    : practice.status==="countIn" || practice.status==="running"
+      ? "暂停"
+      : practice.status==="complete" ? "再来一轮" : "开始练习";
+  $("practicePrimary").disabled=practiceBusy;
+  $("practiceFinish").disabled=practiceBusy || !active;
+  $("practiceReset").disabled=practiceBusy || practice.status==="idle";
+  document.querySelectorAll(".metronome-toggle,.metronome-bpm,.metronome-beats,.metronome-subdivision").forEach(control=>{
+    control.disabled=active || practiceBusy;
+  });
+}
+async function fetchPractice(){
+  try{
+    renderPractice(await fetch("/practice",{cache:"no-store"}).then(response=>response.json()));
+    $("practiceMessage").textContent="";
+  }catch(error){
+    $("practiceMessage").textContent="节奏练习服务离线";
+  }
+}
+async function practiceAction(action){
+  if(practiceBusy) return;
+  practiceBusy=true;
+  if(practiceState) renderPractice(practiceState);
+  const params=new URLSearchParams({action});
+  if(action==="start"){
+    params.set("bpm",Math.max(30,Math.min(240,Number($("practiceBpm").value || 80))));
+    params.set("beatsPerBar","4");
+    params.set("subdivision",$("practiceSubdivision").value);
+    params.set("targetRounds",$("practiceTargetRounds").value);
+    params.set("countInBars","1");
+  }
+  try{
+    const response=await fetch(`/practice?${params}`,{
+      method:"POST",
+      cache:"no-store",
+      headers:{"X-Keyestra-Control":"1"}
+    });
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
+    renderPractice(data);
+    fetchMetronome();
+    $("practiceMessage").textContent="";
+  }catch(error){
+    $("practiceMessage").textContent=error.message || "节奏练习操作失败";
+  }finally{
+    practiceBusy=false;
+    if(practiceState) renderPractice(practiceState);
+  }
+}
+$("practicePrimary").addEventListener("click",()=>{
+  const status=practiceState?.status || "idle";
+  practiceAction(status==="paused" ? "resume" : ["countIn","running"].includes(status) ? "pause" : "start");
+});
+$("practiceFinish").addEventListener("click",()=>practiceAction("finish"));
+$("practiceReset").addEventListener("click",()=>practiceAction("reset"));
+fetchPractice();
+setInterval(fetchPractice,180);
 let recorderState = null;
 let recorderBusy = false;
 function formatRecorderDuration(milliseconds){

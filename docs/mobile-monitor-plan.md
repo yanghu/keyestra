@@ -11,11 +11,27 @@ questions at a glance.
 - Mobile starts directly at practice feedback; the app title, input name, and
   message count are hidden to save vertical space.
 - Current mobile order:
-  1. Current feedback
-  2. Recent velocity
-  3. Current chord
-  4. Velocity stability
-  5. Details
+  1. Rhythm practice
+  2. Metronome
+  3. Current feedback
+  4. Recent velocity
+  5. Current chord
+  6. Velocity stability
+  7. Details
+
+## Implemented Rhythm Practice MVP
+
+- Phone controls start, pause, resume, finish, and reset.
+- Settings cover BPM, 2/3/4 attacks per beat, and 4/8/12/16 four-beat rounds.
+- Each start or resume includes one unscored count-in bar.
+- Analysis runs in Rust against the metronome's monotonic audio-start clock;
+  browser polling is display-only.
+- Note On velocity `0` and non-note messages do not count as attacks.
+- Notes arriving within the existing 52 ms chord window count as one attack.
+- Feedback includes median early/late offset, spread, hit rate, missed attacks,
+  extra attacks, recent hit positions, and per-round summaries.
+- Practice controls temporarily lock timing-changing metronome controls so the
+  scoring grid cannot silently change mid-session.
 
 ## Notes From Design Discussion
 
@@ -53,6 +69,8 @@ questions at a glance.
   - Control notes should not count as practice notes or affect trend/stability.
   - Add a guard against accidental triggers, such as only allowing outermost
     notes or requiring a short hold/double-tap.
+  - Keep this optional. Phone control is the primary interaction and the MVP
+    does not consume or suppress any MIDI note for control.
 - Mobile chord view:
   - Keep overall dynamic and balance score visible.
   - Highlight the most uneven note if spread is large.

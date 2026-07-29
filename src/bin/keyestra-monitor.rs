@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -21,11 +21,14 @@ mod metronome;
 mod midi_clip;
 #[path = "../midi_preview.rs"]
 mod midi_preview;
+#[path = "../practice.rs"]
+mod practice;
 #[path = "../recorder.rs"]
 mod recorder;
 
 use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
+use practice::{Practice, PracticeSettings};
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
 const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
@@ -240,6 +243,7 @@ fn main() -> Result<()> {
     let input_name = midi_in.port_name(&input_port)?;
     let state = Arc::new(Mutex::new(MonitorState::new(input_name.clone())));
     let metronome = Arc::new(Metronome::new());
+    let practice = Arc::new(Practice::new());
     let recordings_dir = cli
         .recordings_dir
         .map(Ok)
@@ -249,12 +253,16 @@ fn main() -> Result<()> {
     let recorder_control = Arc::new(Mutex::new(()));
     let midi_state = Arc::clone(&state);
     let midi_recorder = Arc::clone(&recorder);
+    let midi_metronome = Arc::clone(&metronome);
+    let midi_practice = Arc::clone(&practice);
 
     let _conn = midi_in
         .connect(
             &input_port,
             "keyestra-monitor-input",
             move |_timestamp, message, _| {
+                let timing = midi_metronome.grid_timing(Instant::now());
+                midi_practice.ingest(message, timing);
                 midi_recorder.ingest(message);
                 if let Ok(mut state) = midi_state.lock() {
                     state.ingest(message);
@@ -280,6 +288,7 @@ fn main() -> Result<()> {
             Ok(stream) => {
                 let state = Arc::clone(&state);
                 let metronome = Arc::clone(&metronome);
+                let practice = Arc::clone(&practice);
                 let recorder = Arc::clone(&recorder);
                 let preview = Arc::clone(&preview);
                 let recorder_control = Arc::clone(&recorder_control);
@@ -288,6 +297,7 @@ fn main() -> Result<()> {
                         stream,
                         state,
                         metronome,
+                        practice,
                         recorder,
                         preview,
                         recorder_control,
@@ -372,6 +382,7 @@ fn handle_client(
     mut stream: TcpStream,
     state: Arc<Mutex<MonitorState>>,
     metronome: Arc<Metronome>,
+    practice: Arc<Practice>,
     recorder: Arc<Recorder>,
     preview: Arc<MidiPreview>,
     recorder_control: Arc<Mutex<()>>,
@@ -478,6 +489,117 @@ fn handle_client(
                 "application/json; charset=utf-8",
                 &json,
             )
+        }
+        "/practice" => {
+            if method == "GET" {
+                let body = practice.to_json(metronome.grid_timing(Instant::now()));
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "Practice mutations must use POST",
+                    None,
+                )
+            } else if !has_control_header {
+                respond_api_error(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid_parameter",
+                    "Missing X-Keyestra-Control: 1 header",
+                    None,
+                )
+            } else {
+                let action = query_value(query, "action");
+                let result = match action.as_deref() {
+                    Some("start") => {
+                        let settings = parse_practice_settings(query);
+                        practice.start(settings);
+                        metronome.apply_patch(MetronomePatch {
+                            running: Some(true),
+                            bpm: Some(settings.bpm),
+                            beats_per_bar: Some(settings.beats_per_bar),
+                            subdivision: Some(settings.subdivision),
+                            volume: None,
+                            output_device: None,
+                        });
+                        Ok(())
+                    }
+                    Some("pause") => {
+                        practice.pause(metronome.grid_timing(Instant::now()));
+                        metronome.apply_patch(MetronomePatch {
+                            running: Some(false),
+                            bpm: None,
+                            beats_per_bar: None,
+                            subdivision: None,
+                            volume: None,
+                            output_device: None,
+                        });
+                        Ok(())
+                    }
+                    Some("resume") => {
+                        practice.resume();
+                        metronome.apply_patch(MetronomePatch {
+                            running: Some(true),
+                            bpm: None,
+                            beats_per_bar: None,
+                            subdivision: None,
+                            volume: None,
+                            output_device: None,
+                        });
+                        Ok(())
+                    }
+                    Some("finish") => {
+                        practice.finish(metronome.grid_timing(Instant::now()));
+                        metronome.apply_patch(MetronomePatch {
+                            running: Some(false),
+                            bpm: None,
+                            beats_per_bar: None,
+                            subdivision: None,
+                            volume: None,
+                            output_device: None,
+                        });
+                        Ok(())
+                    }
+                    Some("reset") => {
+                        practice.reset();
+                        metronome.apply_patch(MetronomePatch {
+                            running: Some(false),
+                            bpm: None,
+                            beats_per_bar: None,
+                            subdivision: None,
+                            volume: None,
+                            output_device: None,
+                        });
+                        Ok(())
+                    }
+                    _ => Err("action must be start, pause, resume, finish, or reset"),
+                };
+                match result {
+                    Ok(()) => {
+                        let body = practice.to_json(metronome.grid_timing(Instant::now()));
+                        respond(
+                            &mut stream,
+                            "200 OK",
+                            "application/json; charset=utf-8",
+                            &body,
+                        )
+                    }
+                    Err(message) => respond_api_error(
+                        &mut stream,
+                        "400 Bad Request",
+                        "invalid_parameter",
+                        message,
+                        None,
+                    ),
+                }
+            }
         }
         "/recorder" => {
             let action = query_value(query, "action");
@@ -939,6 +1061,31 @@ fn parse_metronome_patch(query: &str) -> MetronomePatch {
     patch
 }
 
+fn parse_practice_settings(query: &str) -> PracticeSettings {
+    let defaults = PracticeSettings::default();
+    PracticeSettings {
+        bpm: query_value(query, "bpm")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.bpm),
+        beats_per_bar: query_value(query, "beatsPerBar")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.beats_per_bar),
+        subdivision: query_value(query, "subdivision")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.subdivision),
+        target_rounds: query_value(query, "targetRounds")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.target_rounds),
+        count_in_bars: query_value(query, "countInBars")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.count_in_bars),
+        hit_window_ms: query_value(query, "hitWindowMs")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(defaults.hit_window_ms),
+    }
+    .normalized()
+}
+
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -1304,5 +1451,18 @@ mod tests {
         assert_eq!(dynamic_mark(110), "f/ff");
         assert_eq!(dynamic_mark(111), "ff");
         assert_eq!(dynamic_mark(127), "ff");
+    }
+
+    #[test]
+    fn practice_settings_are_parsed_and_clamped() {
+        let settings = parse_practice_settings(
+            "bpm=999&beatsPerBar=4&subdivision=3&targetRounds=0&countInBars=2&hitWindowMs=5",
+        );
+        assert_eq!(settings.bpm, 240);
+        assert_eq!(settings.beats_per_bar, 4);
+        assert_eq!(settings.subdivision, 3);
+        assert_eq!(settings.target_rounds, 1);
+        assert_eq!(settings.count_in_bars, 2);
+        assert_eq!(settings.hit_window_ms, 10.0);
     }
 }
