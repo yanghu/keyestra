@@ -87,8 +87,15 @@ Right-click the tray icon for:
 - Uninstall startup
 - Exit
 
-If the MIDI input or output port is not available at login, the tray app stays open and shows `Status: Waiting`.
-It retries every few seconds until the piano and loopMIDI port are available.
+If the MIDI input or output port is not available at login, the tray app stays
+open and shows `Status: Waiting`. It checks port availability without launching
+the mapper, then starts mapping automatically as soon as the piano and loopMIDI
+port are available. If either port disappears while mapping, the tray returns
+to standby and reconnects when it comes back.
+
+Unexpected mapper crashes use an exponential retry delay from 5 seconds up to
+60 seconds. A mapper that stays up for 30 seconds is considered stable and
+resets the delay.
 Choosing `Stop mapper` disables retry until you choose `Start mapper` or `Restart mapper`.
 
 Install current-user Windows startup from the command line:
@@ -114,6 +121,8 @@ Logs go to:
 ```text
 %APPDATA%\fp10-map\tray.log
 ```
+
+`tray.log` is capped at 5 MB and retains one rotated backup at `tray.log.1`.
 
 ## Config
 
