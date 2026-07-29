@@ -699,6 +699,8 @@ function renderClipSelection(){
   $("clipOutsideEnd").style.width=`${100-end}%`;
   $("clipSelection").style.left=`${start}%`;
   $("clipSelection").style.width=`${Math.max(0,end-start)}%`;
+  $("clipStartBoundary").style.left=`${start}%`;
+  $("clipEndBoundary").style.left=`${end}%`;
   $("clipStartHandle").style.left=`clamp(22px, ${start}%, calc(100% - 22px))`;
   $("clipEndHandle").style.left=`clamp(22px, ${end}%, calc(100% - 22px))`;
   $("clipStartTime").textContent=formatClipTime(clipState.startUs);

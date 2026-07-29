@@ -46,7 +46,7 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(28px,4vw,42px); line-height:1; } h2 {
 .clip-overview-handle-end { right:-2px; }
 .clip-overview-handle-end::after { right:4px; }
 .clip-overview.empty .clip-overview-viewport,.clip-overview.empty .clip-overview-selection,
-.clip-rail.empty .clip-selection,.clip-rail.empty .clip-handle { display:none; }
+.clip-rail.empty .clip-selection,.clip-rail.empty .clip-boundary,.clip-rail.empty .clip-handle { display:none; }
 .clip-view-readout { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:8px; margin-top:-5px; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
 .clip-view-readout span:last-child { text-align:right; }
 .clip-view-readout strong { color:var(--accent); font-size:11px; }
@@ -60,8 +60,10 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(28px,4vw,42px); line-height:1; } h2 {
 .clip-outside-end { right:0; }
 .clip-selection { position:absolute; top:0; bottom:0; min-width:2px; border-top:2px solid rgba(255,255,255,.9); border-bottom:2px solid rgba(255,255,255,.9); cursor:grab; z-index:3; }
 .clip-selection:active { cursor:grabbing; }
+.clip-boundary { position:absolute; top:12px; bottom:12px; width:6px; border-radius:4px; background:#fff; box-shadow:0 0 0 2px var(--accent); pointer-events:none; z-index:5; }
+.clip-boundary-start { transform:none; }
+.clip-boundary-end { transform:translateX(-100%); }
 .clip-handle { position:absolute; top:0; width:44px; height:100%; transform:translateX(-50%); border:0; background:transparent; padding:0; cursor:ew-resize; touch-action:none; z-index:5; }
-.clip-handle::after { content:""; position:absolute; top:12px; bottom:12px; left:19px; width:6px; border-radius:4px; background:#fff; box-shadow:0 0 0 2px var(--accent); }
 .clip-playhead { display:none; position:absolute; top:0; bottom:0; width:2px; background:var(--red); box-shadow:0 0 0 1px rgba(255,255,255,.7); pointer-events:none; z-index:6; }
 .clip-times { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
 .clip-times div { padding:7px 8px; border:1px solid var(--line); border-radius:7px; background:#fbfcfa; }
