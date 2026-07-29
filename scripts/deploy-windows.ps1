@@ -133,8 +133,8 @@ function Activate-Release {
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $tray = Get-ProcessAtPath -Name "keyestra-tray" -ExecutablePath $trayPath
-        $monitor = Get-ProcessAtPath -Name "keyestra-monitor" -ExecutablePath $monitorPath
+        $tray = @(Get-ProcessAtPath -Name "keyestra-tray" -ExecutablePath $trayPath)
+        $monitor = @(Get-ProcessAtPath -Name "keyestra-monitor" -ExecutablePath $monitorPath)
         if ($tray.Count -gt 0 -and $monitor.Count -gt 0) {
             return
         }
