@@ -23,10 +23,10 @@ The MVP does not synthesize piano audio in the browser because that would add
 sample assets, licensing, mobile audio restrictions, memory use, and a preview
 sound that differs from the user's real piano setup.
 
-### Default preview output is `FP10 Mapped`
+### Default preview output is `Keyestra MIDI`
 
 Preview defaults to the MIDI output whose name matches the monitored
-`FP10 Mapped` input. This requires no new loopMIDI port and works with the sound
+`Keyestra MIDI` input. This requires no new loopMIDI port and works with the sound
 source the user already configured.
 
 Sending preview back through that virtual port also makes it return to the
@@ -41,7 +41,7 @@ monitor input. To keep playback from contaminating the rolling recording:
   messages to drain.
 - The UI clearly says that rolling capture is paused during preview.
 
-A separately configured `FP10 Playback` output can be added later for advanced
+A separately configured `Keyestra Playback` output can be added later for advanced
 routing. It is not an MVP requirement.
 
 ### Preview and export share one clip preparation path
@@ -152,7 +152,7 @@ runtime, WebSocket, or web framework is needed.
 New mutations use `POST`, an empty body, query parameters, and:
 
 ```http
-X-FP10-Control: 1
+X-Keyestra-Control: 1
 ```
 
 GET endpoints remain read-only. The server does not enable CORS.
@@ -205,7 +205,7 @@ buffer. Save and preview mutations must never clamp silently.
 
 ```http
 POST /recorder/save-range?sessionId=...&startUs=...&endUs=...
-X-FP10-Control: 1
+X-Keyestra-Control: 1
 Content-Length: 0
 ```
 
@@ -213,7 +213,7 @@ Content-Length: 0
 {
   "ok": true,
   "recording": {
-    "name": "fp10-1722190123456.mid",
+    "name": "keyestra-1722190123456.mid",
     "size": 18432,
     "modifiedMs": 1722190123456,
     "startUs": 3200000000,
@@ -233,7 +233,7 @@ GET /recorder/preview
 ```json
 {
   "ok": true,
-  "outputs": ["FP10 Mapped", "FP10 Playback"],
+  "outputs": ["Keyestra MIDI", "Keyestra Playback"],
   "preview": {
     "state": "stopped",
     "previewId": null,
@@ -241,7 +241,7 @@ GET /recorder/preview
     "selectionStartUs": null,
     "selectionEndUs": null,
     "positionUs": null,
-    "outputName": "FP10 Mapped",
+    "outputName": "Keyestra MIDI",
     "captureSuspended": false,
     "error": null
   }
@@ -251,8 +251,8 @@ GET /recorder/preview
 ### Start or seek preview
 
 ```http
-POST /recorder/preview?action=play&sessionId=...&startUs=...&endUs=...&positionUs=...&outputName=FP10%20Mapped
-X-FP10-Control: 1
+POST /recorder/preview?action=play&sessionId=...&startUs=...&endUs=...&positionUs=...&outputName=Keyestra%20MIDI
+X-Keyestra-Control: 1
 ```
 
 When `positionUs` is omitted, playback starts at `startUs`. Seeking safely stops
@@ -262,7 +262,7 @@ the old preview and prepares a new clip beginning at the requested position.
 
 ```http
 POST /recorder/preview?action=stop&previewId=42
-X-FP10-Control: 1
+X-Keyestra-Control: 1
 ```
 
 The ID prevents a stale phone page from stopping a newer preview started by
@@ -471,7 +471,7 @@ Owns:
 Use `Instant` deadlines plus `recv_timeout` so Stop can interrupt a wait. Do not
 sleep or send MIDI while holding a Recorder mutex.
 
-### `src/bin/fp10-monitor-server.rs`
+### `src/bin/keyestra-monitor.rs`
 
 Only:
 
@@ -518,7 +518,7 @@ The monitor binds to the LAN. This design improves local control without
 claiming full authentication:
 
 - All new mutations are POST.
-- Require `X-FP10-Control: 1`.
+- Require `X-Keyestra-Control: 1`.
 - Do not enable CORS or respond permissively to cross-origin preflight.
 - Validate query length, numbers, range limits, bin counts, and output names.
 - Keep the existing safe recording-name validation.
@@ -608,7 +608,7 @@ Run the standard project validation:
 ```powershell
 cargo fmt --check
 cargo test
-cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
 ```
 
 ## Implementation Sequence
@@ -631,7 +631,7 @@ Each phase is one reviewable, reversible commit.
 3. `Add server-side MIDI preview engine`
    - Add `midi_preview.rs`.
    - Add output enumeration and scheduling.
-   - Default to `FP10 Mapped`.
+   - Default to `Keyestra MIDI`.
    - Add capture gate, Take exclusion, cleanup, and fake-sink tests.
 
 4. `Add mobile clip selection editor`
@@ -657,7 +657,7 @@ real MIDI output or touch UI is added.
 
 - Audio from the phone speaker.
 - Browser SoundFont, samples, or server audio streaming.
-- Mandatory separate `FP10 Playback` port.
+- Mandatory separate `Keyestra Playback` port.
 - Playing live while preview continues recording.
 - Parsing and previewing previously saved `.mid` files.
 - Pause/resume, looping, speed changes, or tempo editing.

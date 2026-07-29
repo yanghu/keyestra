@@ -28,18 +28,20 @@ const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 const STABLE_RUN_DURATION: Duration = Duration::from_secs(30);
 const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
+const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
 
 #[derive(Debug, Parser)]
-#[command(name = "fp10-map-tray")]
-#[command(about = "Windows tray launcher for fp10-map")]
+#[command(name = "keyestra-tray")]
+#[command(about = "Windows tray companion for Keyestra")]
 struct Cli {
     #[arg(long = "in", default_value = "Roland Digital Piano")]
     input: String,
 
-    #[arg(long = "out", default_value = "FP10 Mapped")]
+    #[arg(long = "out", default_value = "Keyestra MIDI")]
     output: String,
 
-    #[arg(long = "monitor-in", default_value = "FP10 Mapped")]
+    #[arg(long = "monitor-in", default_value = "Keyestra MIDI")]
     monitor_input: String,
 
     #[arg(long = "monitor-port", default_value_t = 8770)]
@@ -159,7 +161,7 @@ impl MapperProcess {
         #[cfg(windows)]
         command.creation_flags(CREATE_NO_WINDOW);
 
-        let mut child = command.spawn().context("Failed to start fp10-map.exe")?;
+        let mut child = command.spawn().context("Failed to start keyestra.exe")?;
         if let Some(stdout) = child.stdout.take() {
             spawn_log_reader(stdout, Arc::clone(&self.log));
         }
@@ -246,7 +248,7 @@ impl MonitorProcess {
         self.child = Some(
             command
                 .spawn()
-                .context("Failed to start fp10-monitor-server.exe")?,
+                .context("Failed to start keyestra-monitor.exe")?,
         );
         Ok(())
     }
@@ -562,7 +564,7 @@ impl Supervisor {
 
     fn tooltip_text(&self) -> String {
         format!(
-            "FP-10 tools - mapper: {}, monitor: {}, curve: {}",
+            "Keyestra - mapper: {}, monitor: {}, curve: {}",
             runtime_label(self.mapper_runtime),
             runtime_label(self.monitor_runtime),
             self.curve_label()
@@ -597,7 +599,7 @@ fn probe_midi_ports(
     input_selector: &str,
     output_selector: &str,
 ) -> std::result::Result<(), String> {
-    let midi_in = MidiInput::new("fp10-map-tray-probe-input").map_err(|error| error.to_string())?;
+    let midi_in = MidiInput::new("keyestra-tray-probe-input").map_err(|error| error.to_string())?;
     let input_names = midi_in
         .ports()
         .iter()
@@ -608,7 +610,7 @@ fn probe_midi_ports(
     }
 
     let midi_out =
-        MidiOutput::new("fp10-map-tray-probe-output").map_err(|error| error.to_string())?;
+        MidiOutput::new("keyestra-tray-probe-output").map_err(|error| error.to_string())?;
     let output_names = midi_out
         .ports()
         .iter()
@@ -625,11 +627,18 @@ fn selector_available(selector: &str, names: &[Option<String>]) -> bool {
     match selector.parse::<usize>() {
         Ok(index) => index < names.len(),
         Err(_) => {
-            let selector = selector.to_lowercase();
-            names
-                .iter()
-                .flatten()
-                .any(|name| name.to_lowercase().contains(selector.as_str()))
+            let candidates = if selector.eq_ignore_ascii_case(DEFAULT_MIDI_PORT) {
+                vec![selector, LEGACY_MIDI_PORT]
+            } else {
+                vec![selector]
+            };
+            candidates.into_iter().any(|candidate| {
+                let candidate = candidate.to_lowercase();
+                names
+                    .iter()
+                    .flatten()
+                    .any(|name| name.to_lowercase().contains(candidate.as_str()))
+            })
         }
     }
 }
@@ -742,7 +751,7 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
 
     let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
-        .with_tooltip("FP-10 mapper")
+        .with_tooltip("Keyestra - Digital Piano Companion")
         .with_icon(tray_icon())
         .build()?;
 
@@ -842,7 +851,7 @@ fn mapper_exe_path() -> Result<PathBuf> {
     let dir = exe
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Could not find tray exe directory"))?;
-    Ok(dir.join("fp10-map.exe"))
+    Ok(dir.join("keyestra.exe"))
 }
 
 fn monitor_exe_path() -> Result<PathBuf> {
@@ -850,7 +859,7 @@ fn monitor_exe_path() -> Result<PathBuf> {
     let dir = exe
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Could not find tray exe directory"))?;
-    Ok(dir.join("fp10-monitor-server.exe"))
+    Ok(dir.join("keyestra-monitor.exe"))
 }
 
 fn open_url(url: &str) -> Result<()> {
@@ -967,8 +976,20 @@ fn same_path(left: &Path, right: &Path) -> bool {
 
 fn app_data_dir() -> Result<PathBuf> {
     let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
-    let dir = PathBuf::from(appdata).join("fp10-map");
+    let appdata = PathBuf::from(appdata);
+    let dir = appdata.join("keyestra");
     fs::create_dir_all(&dir)?;
+    let settings = dir.join("tray-settings.toml");
+    let legacy_settings = appdata.join("fp10-map").join("tray-settings.toml");
+    if !settings.exists() && legacy_settings.is_file() {
+        fs::copy(&legacy_settings, &settings).with_context(|| {
+            format!(
+                "Failed to migrate tray settings {} to {}",
+                legacy_settings.display(),
+                settings.display()
+            )
+        })?;
+    }
     Ok(dir)
 }
 
@@ -1006,6 +1027,17 @@ fn startup_script_path() -> Result<PathBuf> {
         .join("Start Menu")
         .join("Programs")
         .join("Startup")
+        .join("keyestra-tray.vbs"))
+}
+
+fn legacy_startup_script_path() -> Result<PathBuf> {
+    let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
+    Ok(PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup")
         .join("fp10-map-tray.vbs"))
 }
 
@@ -1019,14 +1051,19 @@ fn install_startup() -> Result<()> {
         "Set shell = CreateObject(\"WScript.Shell\")\r\nshell.Run \"\"\"{}\"\"\", 0, False\r\n",
         exe.display()
     );
-    fs::write(script_path, script)?;
+    fs::write(&script_path, script)?;
+    let legacy_script = legacy_startup_script_path()?;
+    if legacy_script != script_path && legacy_script.exists() {
+        fs::remove_file(legacy_script)?;
+    }
     Ok(())
 }
 
 fn uninstall_startup() -> Result<()> {
-    let script_path = startup_script_path()?;
-    if script_path.exists() {
-        fs::remove_file(script_path)?;
+    for script_path in [startup_script_path()?, legacy_startup_script_path()?] {
+        if script_path.exists() {
+            fs::remove_file(script_path)?;
+        }
     }
     Ok(())
 }
@@ -1084,7 +1121,7 @@ mod tests {
     #[test]
     fn selector_accepts_index_or_case_insensitive_substring() {
         let names = vec![
-            Some("FP10 Mapped".to_string()),
+            Some("Keyestra MIDI".to_string()),
             Some("Roland Digital Piano".to_string()),
         ];
 
@@ -1092,6 +1129,13 @@ mod tests {
         assert!(selector_available("roland DIGITAL", &names));
         assert!(!selector_available("2", &names));
         assert!(!selector_available("missing", &names));
+    }
+
+    #[test]
+    fn keyestra_port_selector_accepts_the_legacy_port_during_migration() {
+        let names = vec![Some(LEGACY_MIDI_PORT.to_string())];
+
+        assert!(selector_available(DEFAULT_MIDI_PORT, &names));
     }
 
     #[test]
@@ -1105,7 +1149,7 @@ mod tests {
     #[test]
     fn rolling_log_keeps_one_bounded_backup() {
         let directory =
-            env::temp_dir().join(format!("fp10-map-tray-log-test-{}", std::process::id()));
+            env::temp_dir().join(format!("keyestra-tray-log-test-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("tray.log");
         let backup = directory.join("tray.log.1");

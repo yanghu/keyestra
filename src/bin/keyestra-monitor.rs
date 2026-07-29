@@ -28,16 +28,19 @@ use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
+const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
+const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
+
 #[derive(Debug, Parser)]
-#[command(name = "fp10-monitor-server")]
-#[command(about = "Native MIDI monitor backend with a local web dashboard")]
+#[command(name = "keyestra-monitor")]
+#[command(about = "Keyestra monitor backend with a local web dashboard")]
 struct Cli {
     #[arg(long, help = "List MIDI input ports")]
     list: bool,
 
     #[arg(
         long = "in",
-        default_value = "FP10 Mapped",
+        default_value = "Keyestra MIDI",
         help = "MIDI input port name substring or index"
     )]
     input: String,
@@ -230,7 +233,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut midi_in = MidiInput::new("fp10-monitor-input")?;
+    let mut midi_in = MidiInput::new("keyestra-monitor-input")?;
     midi_in.ignore(Ignore::None);
     let selector = PortSelector::parse(&cli.input);
     let input_port = select_input_port(&midi_in, &selector)?;
@@ -250,7 +253,7 @@ fn main() -> Result<()> {
     let _conn = midi_in
         .connect(
             &input_port,
-            "fp10-monitor-input",
+            "keyestra-monitor-input",
             move |_timestamp, message, _| {
                 midi_recorder.ingest(message);
                 if let Ok(mut state) = midi_state.lock() {
@@ -310,7 +313,7 @@ impl PortSelector {
 }
 
 fn list_inputs() -> Result<()> {
-    let midi_in = MidiInput::new("fp10-monitor-list-inputs")?;
+    let midi_in = MidiInput::new("keyestra-monitor-list-inputs")?;
     println!("MIDI Inputs:");
     for (index, port) in midi_in.ports().iter().enumerate() {
         println!("  [{}] {}", index, midi_in.port_name(port)?);
@@ -326,14 +329,24 @@ fn select_input_port(midi_in: &MidiInput, selector: &PortSelector) -> Result<Mid
             .cloned()
             .ok_or_else(|| input_port_error(selector, midi_in, &ports)),
         PortSelector::Name(name) => {
-            for port in &ports {
-                let port_name = midi_in.port_name(port)?;
-                if port_name.to_lowercase().contains(&name.to_lowercase()) {
-                    return Ok(port.clone());
+            for candidate in input_name_candidates(name) {
+                for port in &ports {
+                    let port_name = midi_in.port_name(port)?;
+                    if port_name.to_lowercase().contains(&candidate.to_lowercase()) {
+                        return Ok(port.clone());
+                    }
                 }
             }
             Err(input_port_error(selector, midi_in, &ports))
         }
+    }
+}
+
+fn input_name_candidates(name: &str) -> Vec<&str> {
+    if name.eq_ignore_ascii_case(DEFAULT_MIDI_PORT) {
+        vec![name, LEGACY_MIDI_PORT]
+    } else {
+        vec![name]
     }
 }
 
@@ -375,7 +388,9 @@ fn handle_client(
     let (path, query) = split_target(target);
     let has_control_header = request.lines().skip(1).any(|line| {
         line.split_once(':').is_some_and(|(name, value)| {
-            name.eq_ignore_ascii_case("X-FP10-Control") && value.trim() == "1"
+            (name.eq_ignore_ascii_case("X-Keyestra-Control")
+                || name.eq_ignore_ascii_case("X-FP10-Control"))
+                && value.trim() == "1"
         })
     });
 
@@ -401,7 +416,7 @@ fn handle_client(
         "/version" => {
             let body = serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
-                "build": env!("FP10_BUILD_ID"),
+                "build": env!("KEYESTRA_BUILD_ID"),
             })
             .to_string();
             respond(
@@ -536,7 +551,7 @@ fn handle_client(
                     &mut stream,
                     "400 Bad Request",
                     "invalid_parameter",
-                    "Missing X-FP10-Control: 1 header",
+                    "Missing X-Keyestra-Control: 1 header",
                     None,
                 )
             } else {
@@ -590,7 +605,7 @@ fn handle_client(
                     &mut stream,
                     "400 Bad Request",
                     "invalid_parameter",
-                    "Missing X-FP10-Control: 1 header",
+                    "Missing X-Keyestra-Control: 1 header",
                     None,
                 )
             } else {
@@ -1014,9 +1029,14 @@ fn respond_metronome_events(mut stream: TcpStream, metronome: Arc<Metronome>) ->
 
 fn seed_from_tray_log(state: &Arc<Mutex<MonitorState>>) -> Result<usize> {
     let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
-    let log_path = std::path::PathBuf::from(appdata)
-        .join("fp10-map")
-        .join("tray.log");
+    let appdata = std::path::PathBuf::from(appdata);
+    let current_log = appdata.join("keyestra").join("tray.log");
+    let legacy_log = appdata.join("fp10-map").join("tray.log");
+    let log_path = if current_log.exists() {
+        current_log
+    } else {
+        legacy_log
+    };
     let text = fs::read_to_string(&log_path)
         .with_context(|| format!("Failed to read {}", log_path.display()))?;
     let events: Vec<(u8, u8)> = text
@@ -1235,6 +1255,15 @@ const MONITOR_JS: &str = include_str!("../monitor_web/monitor.js");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_monitor_input_falls_back_to_the_legacy_port() {
+        assert_eq!(
+            input_name_candidates(DEFAULT_MIDI_PORT),
+            vec![DEFAULT_MIDI_PORT, LEGACY_MIDI_PORT]
+        );
+        assert_eq!(input_name_candidates("Custom Port"), vec!["Custom Port"]);
+    }
 
     #[test]
     fn dynamic_mark_uses_overlapping_working_ranges() {

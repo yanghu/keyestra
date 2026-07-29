@@ -16,7 +16,7 @@ For changes touching tray behavior, monitor server behavior, binary names, or
 release packaging assumptions, also run:
 
 ```powershell
-cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
 ```
 
 Hardware behavior cannot be fully validated without MIDI devices and a virtual
@@ -27,11 +27,12 @@ say that live MIDI behavior was not manually tested.
 
 `target\release` is Cargo output, not an installation directory. Normal local
 deployment uses `scripts\deploy-windows.ps1` to publish immutable releases under
-`%LOCALAPPDATA%\fp10-map\releases`. Startup must point to one of those deployed
+`%LOCALAPPDATA%\keyestra\releases`. Startup must point to one of those deployed
 versions, never to `target\release`.
 
 Deployment and activation are separate operations. A normal deployment updates
-Startup but does not stop the live FP10 processes or clear the recorder buffer.
+Startup but does not stop the live Keyestra or legacy FP10 processes or clear
+the recorder buffer.
 Only use `-Activate` when the user explicitly requests immediate activation and
 accepts losing the unsaved in-memory recorder buffer.
 
@@ -73,7 +74,7 @@ items in the final response:
 - the absolute path of the relevant tray binary;
 - the package version, build ID, and source state;
 - the exact footer text the user should see, for example
-  `FP10 Monitor v0.1.0 · 9a9460c0`;
+  `Keyestra v0.2.0 · 9a9460c0`;
 - whether `/version` was verified from that exact binary;
 - whether the running process and Windows Startup already point to that build,
   or whether it is only built/staged and still needs activation.
@@ -92,14 +93,18 @@ items in the final response:
 
 - The app does not create virtual MIDI ports. Assume the user creates loopMIDI/IAC
   ports outside this project.
+- `Keyestra MIDI` is the default virtual port. The runtime accepts the legacy
+  `FP10 Mapped` name as a migration fallback.
 - Avoid changing default port names casually; they match the README and likely
   the user's local loopMIDI setup.
 - `examples/curve.toml` is the default curve path used by examples and tray fallback.
-- The tray app assumes sibling release binaries named `fp10-map.exe` and
-  `fp10-monitor-server.exe`.
+- The tray app assumes sibling release binaries named `keyestra.exe` and
+  `keyestra-monitor.exe`.
 - Deployed releases include `examples\curve.toml` and
   `examples\curve-mid-control.toml` beside the sibling binaries.
-- Startup install writes `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs`.
+- Startup install writes `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs`.
+- Legacy settings and recordings are copied from `%APPDATA%\fp10-map` on first
+  use; source files are retained.
 
 ## Coding Notes
 

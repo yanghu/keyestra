@@ -18,7 +18,7 @@ as part of this work.
 - Repository: `C:\Users\hueyh\OneDrive\Documents\midi curve`
 - Current commit: `9a9460c` (`Show monitor build version in dashboard`)
 - `target\release` was successfully rebuilt at that commit on July 28, 2026.
-- The monitor build identifies itself as `v0.1.0 · 9a9460c0`.
+- The monitor build identifies itself as `v0.2.0 · 9a9460c0`.
 - `target\manual-release` has been deleted.
 - No FP10 processes were running when the standard release was rebuilt and
   verified. The user subsequently started all three binaries from
@@ -27,27 +27,27 @@ as part of this work.
 - The current Startup script is:
 
   ```text
-  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs
+  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs
   ```
 
 - At handoff time, that script points directly to:
 
   ```text
-  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\fp10-map-tray.exe
+  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\keyestra-tray.exe
   ```
 
-- The tray locates `fp10-map.exe` and `fp10-monitor-server.exe` as siblings of
+- The tray locates `keyestra.exe` and `keyestra-monitor.exe` as siblings of
   its own executable. Preserve that invariant.
 - The tray's `Install startup` action currently writes `env::current_exe()` into
   the Startup VBS. See `install_startup()` in
-  `src/bin/fp10-map-tray.rs`.
-- User data currently lives under `%APPDATA%\fp10-map`:
+  `src/bin/keyestra-tray.rs`.
+- User data currently lives under `%APPDATA%\keyestra`:
   settings, logs, and recordings must not be moved or deleted by deployment.
 
 ## Why the Current Layout Is Wrong
 
 `target\release` is Cargo output, not an installation directory. Running
-`target\release\fp10-map-tray.exe` causes Windows to lock that executable and
+`target\release\keyestra-tray.exe` causes Windows to lock that executable and
 the sibling mapper/monitor executables. A later `cargo build --release` then
 cannot replace the locked files.
 
@@ -67,20 +67,20 @@ Keep Cargo output unchanged:
 
 ```text
 <workspace>\target\release\
-  fp10-map.exe
-  fp10-map-tray.exe
-  fp10-monitor-server.exe
+  keyestra.exe
+  keyestra-tray.exe
+  keyestra-monitor.exe
 ```
 
 Deploy immutable, versioned copies outside the repository:
 
 ```text
-%LOCALAPPDATA%\fp10-map\
+%LOCALAPPDATA%\keyestra\
   releases\
-    0.1.0-9a9460c0\
-      fp10-map.exe
-      fp10-map-tray.exe
-      fp10-monitor-server.exe
+    0.2.0-9a9460c0\
+      keyestra.exe
+      keyestra-tray.exe
+      keyestra-monitor.exe
       examples\
         curve.toml
         curve-mid-control.toml
@@ -99,9 +99,9 @@ minimal shape is:
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "build": "9a9460c0",
-  "path": "C:\\Users\\...\\AppData\\Local\\fp10-map\\releases\\0.1.0-9a9460c0"
+  "path": "C:\\Users\\...\\AppData\\Local\\keyestra\\releases\\0.2.0-9a9460c0"
 }
 ```
 
@@ -127,7 +127,7 @@ The script should:
    ```powershell
    cargo fmt --check
    cargo test
-   cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+   cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
    ```
 
 4. Derive the package version from `Cargo.toml` and the build ID from
@@ -135,7 +135,7 @@ The script should:
 5. Create a uniquely named staging directory under:
 
    ```text
-   %LOCALAPPDATA%\fp10-map\releases
+   %LOCALAPPDATA%\keyestra\releases
    ```
 
 6. Copy the three release executables and the two built-in curve files into the
@@ -147,7 +147,7 @@ The script should:
 10. Update Startup by invoking the newly deployed tray:
 
     ```powershell
-    & "$releaseDir\fp10-map-tray.exe" --install-startup
+    & "$releaseDir\keyestra-tray.exe" --install-startup
     ```
 
     Because `install_startup()` uses `env::current_exe()`, this makes the VBS
@@ -173,7 +173,7 @@ Treat deployment and activation as different operations:
 An optional `-Activate` flag may be added, but it must:
 
 1. Warn clearly that unsaved rolling-buffer MIDI will be lost.
-2. Stop only `fp10-map`, `fp10-map-tray`, and `fp10-monitor-server`.
+2. Stop only `keyestra`, `keyestra-tray`, and `keyestra-monitor`.
 3. Avoid killing unrelated processes or using broad path/glob deletion.
 4. Start the deployed tray, not `target\release`.
 5. Verify that the tray and monitor remain running.
@@ -190,7 +190,7 @@ Every successful deployment updates it to the new version.
 Rollback should be simple:
 
 ```powershell
-& "$oldReleaseDir\fp10-map-tray.exe" --install-startup
+& "$oldReleaseDir\keyestra-tray.exe" --install-startup
 ```
 
 Then exit the current tray and start the old deployed tray if immediate rollback
@@ -243,7 +243,7 @@ identifier separately from custom paths. Keep README and tests synchronized.
   - remove the assumption that release binaries are normally run from
     `target\release`;
   - update build/deploy/restart instructions for versioned deployment.
-- Possibly `src/bin/fp10-map-tray.rs`
+- Possibly `src/bin/keyestra-tray.rs`
   - curve setting migration;
   - optional deployed-version/status display;
   - only change Startup behavior if the deploy script cannot safely reuse
@@ -260,7 +260,7 @@ Run the normal project validation:
 ```powershell
 cargo fmt --check
 cargo test
-cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
 ```
 
 Then validate the deployment workflow:
@@ -279,7 +279,7 @@ Then validate the deployment workflow:
 12. Confirm Overview, `全部`, `回到最新`, drag/pan, zoom controls, desktop
     Ctrl/Cmd-wheel, and mobile pinch are present.
 13. Roll Startup back to version A and verify rollback.
-14. Confirm recordings, settings, and logs under `%APPDATA%\fp10-map` remain
+14. Confirm recordings, settings, and logs under `%APPDATA%\keyestra` remain
     untouched.
 
 Hardware behavior cannot be fully validated without the real MIDI path. If

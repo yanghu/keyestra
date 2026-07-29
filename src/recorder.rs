@@ -226,7 +226,10 @@ impl Recorder {
 
     pub fn default_directory() -> Result<PathBuf> {
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return Ok(PathBuf::from(appdata).join("fp10-map").join("recordings"));
+            let appdata = PathBuf::from(appdata);
+            let directory = appdata.join("keyestra").join("recordings");
+            migrate_legacy_recordings(&appdata.join("fp10-map").join("recordings"), &directory)?;
+            return Ok(directory);
         }
         Ok(std::env::current_dir()
             .context("Failed to locate the current directory")?
@@ -573,20 +576,65 @@ impl Recorder {
         let timestamp = unix_time_ms();
         for suffix in 0..1_000_u16 {
             let name = if suffix == 0 {
-                format!("fp10-{}.mid", timestamp)
+                format!("keyestra-{}.mid", timestamp)
             } else {
-                format!("fp10-{}-{}.mid", timestamp, suffix)
+                format!("keyestra-{}-{}.mid", timestamp, suffix)
             };
             if !self.recordings_dir.join(&name).exists() {
                 return name;
             }
         }
-        format!("fp10-{}-overflow.mid", timestamp)
+        format!("keyestra-{}-overflow.mid", timestamp)
     }
 
     fn elapsed_us(&self) -> u64 {
         self.clock.elapsed().as_micros().min(u64::MAX as u128) as u64
     }
+}
+
+fn migrate_legacy_recordings(legacy: &Path, destination: &Path) -> Result<()> {
+    const MARKER: &str = ".fp10-recordings-migrated";
+
+    fs::create_dir_all(destination)
+        .with_context(|| format!("Failed to create {}", destination.display()))?;
+    let marker = destination.join(MARKER);
+    if marker.exists() || !legacy.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(legacy)
+        .with_context(|| format!("Failed to list legacy recordings {}", legacy.display()))?
+    {
+        let entry = entry?;
+        let source = entry.path();
+        let Some(name) = source.file_name() else {
+            continue;
+        };
+        if !source.is_file()
+            || source
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_none_or(|extension| !extension.eq_ignore_ascii_case("mid"))
+        {
+            continue;
+        }
+        let target = destination.join(name);
+        if !target.exists() {
+            fs::copy(&source, &target).with_context(|| {
+                format!(
+                    "Failed to migrate recording {} to {}",
+                    source.display(),
+                    target.display()
+                )
+            })?;
+        }
+    }
+
+    fs::write(
+        &marker,
+        b"Legacy FP10 recordings copied; source files were retained.\n",
+    )
+    .with_context(|| format!("Failed to write migration marker {}", marker.display()))
 }
 
 fn trim_old_events(events: &mut VecDeque<TimedMidiEvent>, now_us: u64, duration: Duration) -> bool {
@@ -808,8 +856,31 @@ mod tests {
     #[test]
     fn recording_paths_cannot_escape_directory() {
         let directory = Path::new("recordings");
-        assert!(safe_recording_path(directory, "fp10-123.mid").is_ok());
+        assert!(safe_recording_path(directory, "keyestra-123.mid").is_ok());
         assert!(safe_recording_path(directory, "../secret.mid").is_err());
+    }
+
+    #[test]
+    fn legacy_recordings_are_copied_once_and_the_source_is_retained() {
+        let root = std::env::temp_dir().join(format!(
+            "keyestra-recorder-migration-test-{}-{}",
+            std::process::id(),
+            unix_time_ms()
+        ));
+        let legacy = root.join("fp10-map").join("recordings");
+        let destination = root.join("keyestra").join("recordings");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("fp10-old.mid"), b"midi").unwrap();
+        fs::write(legacy.join("ignore.txt"), b"text").unwrap();
+
+        migrate_legacy_recordings(&legacy, &destination).unwrap();
+        migrate_legacy_recordings(&legacy, &destination).unwrap();
+
+        assert_eq!(fs::read(destination.join("fp10-old.mid")).unwrap(), b"midi");
+        assert!(destination.join(".fp10-recordings-migrated").exists());
+        assert!(!destination.join("ignore.txt").exists());
+        assert!(legacy.join("fp10-old.mid").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -823,7 +894,7 @@ mod tests {
     #[test]
     fn stale_session_and_empty_ranges_have_typed_errors() {
         let directory = std::env::temp_dir().join(format!(
-            "fp10-recorder-range-test-{}-{}",
+            "keyestra-recorder-range-test-{}-{}",
             std::process::id(),
             unix_time_ms()
         ));

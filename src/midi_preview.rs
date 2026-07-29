@@ -10,7 +10,8 @@ use serde::Serialize;
 use crate::midi_clip::PreparedClip;
 use crate::recorder::Recorder;
 
-const DEFAULT_OUTPUT: &str = "FP10 Mapped";
+const DEFAULT_OUTPUT: &str = "Keyestra MIDI";
+const LEGACY_OUTPUT: &str = "FP10 Mapped";
 const CAPTURE_RESUME_DELAY: Duration = Duration::from_millis(150);
 
 trait MidiSink {
@@ -139,7 +140,7 @@ impl MidiPreview {
         let worker_state = Arc::clone(&state);
         let worker_recorder = Arc::clone(&recorder);
         thread::Builder::new()
-            .name("fp10-midi-preview".into())
+            .name("keyestra-midi-preview".into())
             .spawn(move || worker(receiver, worker_state, worker_recorder))
             .expect("failed to start MIDI preview worker");
         Self {
@@ -426,7 +427,7 @@ fn set_stopped_state(
 }
 
 fn output_names() -> Result<Vec<String>, PreviewError> {
-    let midi_output = MidiOutput::new("fp10-preview-list")
+    let midi_output = MidiOutput::new("keyestra-preview-list")
         .map_err(|error| PreviewError::new(PreviewErrorCode::PreviewFailed, error.to_string()))?;
     Ok(midi_output
         .ports()
@@ -436,12 +437,37 @@ fn output_names() -> Result<Vec<String>, PreviewError> {
 }
 
 fn connect_output(output_name: &str) -> Result<MidiOutputConnection, PreviewError> {
-    let midi_output = MidiOutput::new("fp10-preview-output").map_err(|error| {
+    let midi_output = MidiOutput::new("keyestra-preview-output").map_err(|error| {
         PreviewError::new(PreviewErrorCode::OutputConnectFailed, error.to_string())
     })?;
     let ports = midi_output.ports();
     let wanted = output_name.to_lowercase();
-    let port = ports
+    let port = find_output_port(&midi_output, &ports, &wanted)
+        .or_else(|| {
+            output_name
+                .eq_ignore_ascii_case(DEFAULT_OUTPUT)
+                .then(|| find_output_port(&midi_output, &ports, &LEGACY_OUTPUT.to_lowercase()))
+                .flatten()
+        })
+        .ok_or_else(|| {
+            PreviewError::new(
+                PreviewErrorCode::OutputNotFound,
+                format!("MIDI output '{}' was not found", output_name),
+            )
+        })?;
+    midi_output
+        .connect(&port, "keyestra-preview")
+        .map_err(|error| {
+            PreviewError::new(PreviewErrorCode::OutputConnectFailed, error.to_string())
+        })
+}
+
+fn find_output_port(
+    midi_output: &MidiOutput,
+    ports: &[midir::MidiOutputPort],
+    wanted: &str,
+) -> Option<midir::MidiOutputPort> {
+    ports
         .iter()
         .find(|port| {
             midi_output
@@ -452,19 +478,10 @@ fn connect_output(output_name: &str) -> Result<MidiOutputConnection, PreviewErro
             ports.iter().find(|port| {
                 midi_output
                     .port_name(port)
-                    .is_ok_and(|name| name.to_lowercase().contains(&wanted))
+                    .is_ok_and(|name| name.to_lowercase().contains(wanted))
             })
         })
         .cloned()
-        .ok_or_else(|| {
-            PreviewError::new(
-                PreviewErrorCode::OutputNotFound,
-                format!("MIDI output '{}' was not found", output_name),
-            )
-        })?;
-    midi_output.connect(&port, "fp10-preview").map_err(|error| {
-        PreviewError::new(PreviewErrorCode::OutputConnectFailed, error.to_string())
-    })
 }
 
 fn send_channel_cleanup<S: MidiSink>(connection: &mut S, clip: &PreparedClip, all_sound_off: bool) {
@@ -495,7 +512,7 @@ mod tests {
     #[test]
     fn stale_preview_id_is_rejected_without_touching_worker() {
         let directory = std::env::temp_dir().join(format!(
-            "fp10-preview-test-{}-{}",
+            "keyestra-preview-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

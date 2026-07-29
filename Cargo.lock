@@ -632,22 +632,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fp10-map"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "cpal",
- "ctrlc",
- "midir",
- "serde",
- "serde_json",
- "tao",
- "toml",
- "tray-icon",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1190,6 +1174,22 @@ dependencies = [
  "bitflags 2.13.0",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "keyestra"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpal",
+ "ctrlc",
+ "midir",
+ "serde",
+ "serde_json",
+ "tao",
+ "toml",
+ "tray-icon",
 ]
 
 [[package]]

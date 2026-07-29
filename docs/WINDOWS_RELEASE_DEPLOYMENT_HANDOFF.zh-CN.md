@@ -21,7 +21,7 @@ Windows 可以锁定正在运行的 `.exe`，但这种锁定绝不能再阻止
 
 - 当前 commit：`9a9460c`（`Show monitor build version in dashboard`）。
 - `target\release` 已在 2026 年 7 月 28 日基于这个 commit 成功重新构建。
-- Monitor 页面显示的构建标识为 `v0.1.0 · 9a9460c0`。
+- Monitor 页面显示的构建标识为 `v0.2.0 · 9a9460c0`。
 - `target\manual-release` 已经删除。
 - 重新构建和验证标准 release 时，所有 FP10 进程均已退出。之后用户又在
   2026 年 7 月 28 日晚上约 10:09 从 `target\release` 启动了三个二进制，
@@ -29,26 +29,26 @@ Windows 可以锁定正在运行的 `.exe`，但这种锁定绝不能再阻止
 - 当前 Startup 脚本位于：
 
   ```text
-  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs
+  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs
   ```
 
 - 交接时，该脚本直接指向：
 
   ```text
-  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\fp10-map-tray.exe
+  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\keyestra-tray.exe
   ```
 
-- Tray 会在自身所在目录寻找同级的 `fp10-map.exe` 和
-  `fp10-monitor-server.exe`。必须保留这个约束。
+- Tray 会在自身所在目录寻找同级的 `keyestra.exe` 和
+  `keyestra-monitor.exe`。必须保留这个约束。
 - Tray 的 `Install startup` 操作目前会将 `env::current_exe()` 写入 Startup
-  VBS。代码位于 `src/bin/fp10-map-tray.rs` 的 `install_startup()`。
-- 用户数据目前位于 `%APPDATA%\fp10-map`。部署过程不得移动或删除其中的
+  VBS。代码位于 `src/bin/keyestra-tray.rs` 的 `install_startup()`。
+- 用户数据目前位于 `%APPDATA%\keyestra`。部署过程不得移动或删除其中的
   设置、日志和录音文件。
 
 ## 当前目录结构为什么不正确
 
 `target\release` 是 Cargo 的输出目录，不是安装目录。直接运行
-`target\release\fp10-map-tray.exe` 后，Windows 会锁定这个文件以及同目录的
+`target\release\keyestra-tray.exe` 后，Windows 会锁定这个文件以及同目录的
 mapper 和 monitor 二进制。下一次执行 `cargo build --release` 时，Cargo
 便无法替换这些被锁定的文件。
 
@@ -68,20 +68,20 @@ Cargo 输出保持不变：
 
 ```text
 <workspace>\target\release\
-  fp10-map.exe
-  fp10-map-tray.exe
-  fp10-monitor-server.exe
+  keyestra.exe
+  keyestra-tray.exe
+  keyestra-monitor.exe
 ```
 
 将不可变、带版本号的副本部署到仓库之外：
 
 ```text
-%LOCALAPPDATA%\fp10-map\
+%LOCALAPPDATA%\keyestra\
   releases\
-    0.1.0-9a9460c0\
-      fp10-map.exe
-      fp10-map-tray.exe
-      fp10-monitor-server.exe
+    0.2.0-9a9460c0\
+      keyestra.exe
+      keyestra-tray.exe
+      keyestra-monitor.exe
       examples\
         curve.toml
         curve-mid-control.toml
@@ -98,9 +98,9 @@ Cargo 输出保持不变：
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "build": "9a9460c0",
-  "path": "C:\\Users\\...\\AppData\\Local\\fp10-map\\releases\\0.1.0-9a9460c0"
+  "path": "C:\\Users\\...\\AppData\\Local\\keyestra\\releases\\0.2.0-9a9460c0"
 }
 ```
 
@@ -126,7 +126,7 @@ scripts\deploy-windows.ps1
    ```powershell
    cargo fmt --check
    cargo test
-   cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+   cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
    ```
 
 4. 从 `Cargo.toml` 获取包版本，并通过
@@ -134,7 +134,7 @@ scripts\deploy-windows.ps1
 5. 在以下目录下创建名称唯一的 staging 目录：
 
    ```text
-   %LOCALAPPDATA%\fp10-map\releases
+   %LOCALAPPDATA%\keyestra\releases
    ```
 
 6. 将三个 release 二进制和两个内置 curve 文件复制到 staging 目录。
@@ -146,7 +146,7 @@ scripts\deploy-windows.ps1
 10. 调用新部署的 tray 更新 Startup：
 
     ```powershell
-    & "$releaseDir\fp10-map-tray.exe" --install-startup
+    & "$releaseDir\keyestra-tray.exe" --install-startup
     ```
 
     因为 `install_startup()` 使用 `env::current_exe()`，这样 VBS 会直接
@@ -169,8 +169,8 @@ scripts\deploy-windows.ps1
 可以提供可选的 `-Activate` 参数，但它必须：
 
 1. 明确警告未保存的滚动 MIDI 缓存将丢失。
-2. 只停止 `fp10-map`、`fp10-map-tray` 和
-   `fp10-monitor-server`。
+2. 只停止 `keyestra`、`keyestra-tray` 和
+   `keyestra-monitor`。
 3. 不得终止其他进程，也不得使用范围过大的路径或 glob 删除操作。
 4. 启动已部署的 tray，而不是 `target\release` 中的 tray。
 5. 验证 tray 和 monitor 启动后仍在运行。
@@ -186,7 +186,7 @@ Startup VBS 可以直接指向选中的不可变版本目录。每次成功部�
 回滚操作应保持简单：
 
 ```powershell
-& "$oldReleaseDir\fp10-map-tray.exe" --install-startup
+& "$oldReleaseDir\keyestra-tray.exe" --install-startup
 ```
 
 如果希望立即回滚，再退出当前 tray 并启动旧版本的已部署 tray。
@@ -233,7 +233,7 @@ curve 才保存路径。README 与测试必须同步更新。
 - `AGENTS.md`
   - 删除“release 二进制通常从 `target\release` 运行”的假设；
   - 按版本化部署方式更新构建、部署和重启说明。
-- 可能需要修改 `src/bin/fp10-map-tray.rs`
+- 可能需要修改 `src/bin/keyestra-tray.rs`
   - curve 设置迁移；
   - 可选的已部署版本/状态显示；
   - 只有当部署脚本无法安全复用 `--install-startup` 时，才修改 Startup
@@ -249,7 +249,7 @@ curve 才保存路径。README 与测试必须同步更新。
 ```powershell
 cargo fmt --check
 cargo test
-cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
 ```
 
 然后验证部署工作流：
@@ -268,7 +268,7 @@ cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-serv
 12. 确认 Overview、`全部`、`回到最新`、拖动/平移、缩放按钮、桌面
     Ctrl/Cmd + 滚轮和手机 pinch 均存在。
 13. 将 Startup 回滚到版本 A，并验证回滚。
-14. 确认 `%APPDATA%\fp10-map` 中的录音、设置和日志均未受影响。
+14. 确认 `%APPDATA%\keyestra` 中的录音、设置和日志均未受影响。
 
 没有真实 MIDI 硬件时无法完整验证硬件行为。若缺少硬件，应明确说明没有手动
 测试 live MIDI 重连和 recorder 行为。

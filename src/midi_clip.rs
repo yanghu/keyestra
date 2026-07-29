@@ -254,7 +254,7 @@ pub fn is_note_on(message: &[u8]) -> bool {
 pub fn encode_smf(clip: &PreparedClip) -> Result<Vec<u8>> {
     let mut track = Vec::with_capacity(clip.events.len().saturating_mul(5).saturating_add(128));
     track.extend_from_slice(&[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20]);
-    let track_name = b"FP10 Mapped";
+    let track_name = b"Keyestra MIDI";
     track.extend_from_slice(&[0x00, 0xFF, 0x03, track_name.len() as u8]);
     track.extend_from_slice(track_name);
 

@@ -14,8 +14,8 @@ use crate::mapping::VelocityMapper;
 use crate::midi::{list_ports, run_forwarder, PortSelector};
 
 #[derive(Debug, Parser)]
-#[command(name = "fp10-map")]
-#[command(about = "Low-latency MIDI velocity mapping forwarder")]
+#[command(name = "keyestra")]
+#[command(about = "Keyestra digital piano MIDI companion")]
 struct Cli {
     #[arg(long, help = "List MIDI input and output ports")]
     list: bool,

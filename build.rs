@@ -4,18 +4,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-env-changed=FP10_BUILD_ID_OVERRIDE");
+    println!("cargo:rerun-if-env-changed=KEYESTRA_BUILD_ID_OVERRIDE");
     if let Ok(head) = fs::read_to_string(".git/HEAD") {
         if let Some(reference) = head.trim().strip_prefix("ref: ") {
             println!("cargo:rerun-if-changed=.git/{reference}");
         }
     }
 
-    let build_id = std::env::var("FP10_BUILD_ID_OVERRIDE")
+    let build_id = std::env::var("KEYESTRA_BUILD_ID_OVERRIDE")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(git_build_id);
-    println!("cargo:rustc-env=FP10_BUILD_ID={build_id}");
+    println!("cargo:rustc-env=KEYESTRA_BUILD_ID={build_id}");
 }
 
 fn git_build_id() -> String {

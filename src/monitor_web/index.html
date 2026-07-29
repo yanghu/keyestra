@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FP-10 Native MIDI Monitor</title>
+  <title>Keyestra — Digital Piano Companion</title>
   <link rel="stylesheet" href="/assets/monitor.css">
 </head>
 <body>
   <main>
     <header>
       <div>
-        <h1>FP-10 Native MIDI Monitor</h1>
+        <h1>Keyestra</h1>
+        <p class="tagline">Digital Piano Companion</p>
         <p class="subtitle">Rust 后端读取 MIDI，浏览器只显示数据。</p>
       </div>
       <div class="status" id="status">连接中</div>
@@ -49,7 +50,7 @@
               <button type="button" data-clip-view="all">全部</button>
             </div>
             <select id="clipOutput" aria-label="试听 MIDI 输出">
-              <option value="FP10 Mapped">FP10 Mapped</option>
+              <option value="Keyestra MIDI">Keyestra MIDI</option>
             </select>
           </div>
           <div class="clip-navigation" role="group" aria-label="时间轴导航">
@@ -307,7 +308,7 @@
         <div class="raw" id="raw"></div>
       </section>
     </section>
-    <footer class="build-version" id="buildVersion">FP10 Monitor · 版本未知</footer>
+    <footer class="build-version" id="buildVersion">Keyestra · 版本未知</footer>
   </main>
   <script src="/assets/monitor.js"></script>
 </body>

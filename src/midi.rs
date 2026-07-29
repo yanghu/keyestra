@@ -8,6 +8,9 @@ use midir::{Ignore, MidiInput, MidiInputPort, MidiOutput, MidiOutputPort};
 use crate::mapping::VelocityMapper;
 use crate::monitor;
 
+const DEFAULT_OUTPUT_NAME: &str = "Keyestra MIDI";
+const LEGACY_OUTPUT_NAME: &str = "FP10 Mapped";
+
 #[derive(Debug, Clone)]
 pub enum PortSelector {
     Index(usize),
@@ -28,8 +31,8 @@ impl PortSelector {
 }
 
 pub fn list_ports() -> Result<()> {
-    let midi_in = MidiInput::new("fp10-map-list-inputs")?;
-    let midi_out = MidiOutput::new("fp10-map-list-outputs")?;
+    let midi_in = MidiInput::new("keyestra-list-inputs")?;
+    let midi_out = MidiOutput::new("keyestra-list-outputs")?;
 
     println!("MIDI Inputs:");
     for (index, port) in midi_in.ports().iter().enumerate() {
@@ -52,9 +55,9 @@ pub fn run_forwarder(
     monitor_enabled: bool,
     shutdown_rx: Receiver<()>,
 ) -> Result<()> {
-    let mut midi_in = MidiInput::new("fp10-map-input")?;
+    let mut midi_in = MidiInput::new("keyestra-input")?;
     midi_in.ignore(Ignore::None);
-    let midi_out = MidiOutput::new("fp10-map-output")?;
+    let midi_out = MidiOutput::new("keyestra-output")?;
 
     let input_port = select_input_port(&midi_in, &input_selector)?;
     let output_port = select_output_port(&midi_out, &output_selector)?;
@@ -66,7 +69,7 @@ pub fn run_forwarder(
     println!("Press Ctrl+C to stop.");
 
     let output_conn = midi_out
-        .connect(&output_port, "fp10-map-output")
+        .connect(&output_port, "keyestra-output")
         .with_context(|| format!("Failed to connect MIDI output {}", output_name))?;
     let output_conn = Arc::new(Mutex::new(output_conn));
 
@@ -75,7 +78,7 @@ pub fn run_forwarder(
     let _input_conn = midi_in
         .connect(
             &input_port,
-            "fp10-map-input",
+            "keyestra-input",
             move |_timestamp, message, _| {
                 let (mapped, report) = callback_mapper.map_message(message);
                 if let Ok(mut output) = callback_output.lock() {
@@ -92,7 +95,7 @@ pub fn run_forwarder(
         .with_context(|| format!("Failed to connect MIDI input {}", input_name))?;
 
     let _ = shutdown_rx.recv();
-    println!("Stopping fp10-map.");
+    println!("Stopping Keyestra.");
     Ok(())
 }
 
@@ -123,14 +126,24 @@ fn select_output_port(midi_out: &MidiOutput, selector: &PortSelector) -> Result<
             .cloned()
             .ok_or_else(|| output_port_error("output", selector, midi_out, &ports)),
         PortSelector::Name(name) => {
-            for port in &ports {
-                let port_name = midi_out.port_name(port)?;
-                if port_name.to_lowercase().contains(&name.to_lowercase()) {
-                    return Ok(port.clone());
+            for candidate in port_name_candidates(name) {
+                for port in &ports {
+                    let port_name = midi_out.port_name(port)?;
+                    if port_name.to_lowercase().contains(&candidate.to_lowercase()) {
+                        return Ok(port.clone());
+                    }
                 }
             }
             Err(output_port_error("output", selector, midi_out, &ports))
         }
+    }
+}
+
+fn port_name_candidates(name: &str) -> Vec<&str> {
+    if name.eq_ignore_ascii_case(DEFAULT_OUTPUT_NAME) {
+        vec![name, LEGACY_OUTPUT_NAME]
+    } else {
+        vec![name]
     }
 }
 
@@ -170,4 +183,18 @@ fn output_port_error(
         lines.push(format!("  [{}] {}", index, name));
     }
     anyhow::anyhow!(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_falls_back_to_the_legacy_port() {
+        assert_eq!(
+            port_name_candidates(DEFAULT_OUTPUT_NAME),
+            vec![DEFAULT_OUTPUT_NAME, LEGACY_OUTPUT_NAME]
+        );
+        assert_eq!(port_name_candidates("Custom Port"), vec!["Custom Port"]);
+    }
 }

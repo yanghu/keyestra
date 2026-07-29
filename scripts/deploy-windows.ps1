@@ -114,20 +114,27 @@ function Get-ProcessAtPath {
 function Activate-Release {
     param([Parameter(Mandatory = $true)][string]$ReleasePath)
 
-    Write-Warning "Activating now stops FP10 processes and discards any unsaved in-memory recorder buffer."
-    foreach ($processName in @("fp10-map", "fp10-map-tray", "fp10-monitor-server")) {
+    Write-Warning "Activating now stops Keyestra and legacy FP10 processes and discards any unsaved in-memory recorder buffer."
+    foreach ($processName in @(
+        "keyestra",
+        "keyestra-tray",
+        "keyestra-monitor",
+        "fp10-map",
+        "fp10-map-tray",
+        "fp10-monitor-server"
+    )) {
         Get-Process -Name $processName -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction Stop
     }
 
-    $trayPath = Join-Path $ReleasePath "fp10-map-tray.exe"
-    $monitorPath = Join-Path $ReleasePath "fp10-monitor-server.exe"
+    $trayPath = Join-Path $ReleasePath "keyestra-tray.exe"
+    $monitorPath = Join-Path $ReleasePath "keyestra-monitor.exe"
     Start-Process -FilePath $trayPath
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $tray = Get-ProcessAtPath -Name "fp10-map-tray" -ExecutablePath $trayPath
-        $monitor = Get-ProcessAtPath -Name "fp10-monitor-server" -ExecutablePath $monitorPath
+        $tray = Get-ProcessAtPath -Name "keyestra-tray" -ExecutablePath $trayPath
+        $monitor = Get-ProcessAtPath -Name "keyestra-monitor" -ExecutablePath $monitorPath
         if ($tray.Count -gt 0 -and $monitor.Count -gt 0) {
             return
         }
@@ -148,10 +155,10 @@ if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
     throw "APPDATA is not set."
 }
 
-$deploymentRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "fp10-map"))
+$deploymentRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "keyestra"))
 $releasesRoot = Join-Path $deploymentRoot "releases"
 $startupPath = [IO.Path]::GetFullPath(
-    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs")
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs")
 )
 
 Push-Location $workspace
@@ -193,15 +200,15 @@ try {
     Invoke-CheckedCommand "cargo fmt --check" { cargo fmt --check }
     Invoke-CheckedCommand "cargo test" { cargo test }
 
-    $previousBuildOverride = $env:FP10_BUILD_ID_OVERRIDE
+    $previousBuildOverride = $env:KEYESTRA_BUILD_ID_OVERRIDE
     try {
-        $env:FP10_BUILD_ID_OVERRIDE = $build
+        $env:KEYESTRA_BUILD_ID_OVERRIDE = $build
         Invoke-CheckedCommand "cargo build --release" {
-            cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+            cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
         }
     }
     finally {
-        $env:FP10_BUILD_ID_OVERRIDE = $previousBuildOverride
+        $env:KEYESTRA_BUILD_ID_OVERRIDE = $previousBuildOverride
     }
 }
 finally {
@@ -211,9 +218,9 @@ finally {
 $releaseName = "$version-$build"
 $releaseDir = Join-Path $releasesRoot $releaseName
 $requiredFiles = @(
-    "fp10-map.exe",
-    "fp10-map-tray.exe",
-    "fp10-monitor-server.exe",
+    "keyestra.exe",
+    "keyestra-tray.exe",
+    "keyestra-monitor.exe",
     "examples\curve.toml",
     "examples\curve-mid-control.toml"
 )
@@ -237,7 +244,7 @@ else {
 
     try {
         New-Item -ItemType Directory -Path (Join-Path $stagingDir "examples") -Force | Out-Null
-        foreach ($binary in @("fp10-map.exe", "fp10-map-tray.exe", "fp10-monitor-server.exe")) {
+        foreach ($binary in @("keyestra.exe", "keyestra-tray.exe", "keyestra-monitor.exe")) {
             Copy-Item -LiteralPath (Join-Path $cargoOutput $binary) -Destination (Join-Path $stagingDir $binary)
         }
         foreach ($curve in @("curve.toml", "curve-mid-control.toml")) {
@@ -259,7 +266,7 @@ Assert-RequiredFiles -Root $releaseDir -RelativePaths $requiredFiles
 $currentPath = Join-Path $deploymentRoot "current.json"
 Write-CurrentMetadata -MetadataPath $currentPath -Version $version -Build $build -ReleasePath $releaseDir -SourceState $sourceState
 
-$deployedTray = Join-Path $releaseDir "fp10-map-tray.exe"
+$deployedTray = Join-Path $releaseDir "keyestra-tray.exe"
 $startupInstaller = Start-Process -FilePath $deployedTray -ArgumentList "--install-startup" -Wait -PassThru
 if ($startupInstaller.ExitCode -ne 0) {
     throw "Startup installation failed with exit code $($startupInstaller.ExitCode)."

@@ -1,5 +1,11 @@
 const state = { cutoffTimeMs: 0, cutoffMessageCount: 0, stabilityCutoffTimeMs: 0, latestData: null };
-const storageKey = "fp10-monitor-settings";
+const storageKey = "keyestra-monitor-settings";
+const legacyStorageKey = "fp10-monitor-settings";
+try {
+  if (!localStorage.getItem(storageKey) && localStorage.getItem(legacyStorageKey)) {
+    localStorage.setItem(storageKey, localStorage.getItem(legacyStorageKey));
+  }
+} catch (error) {}
 const bands = [
   {value:20,label:"pp"},
   {value:40,label:"p"},
@@ -850,7 +856,7 @@ async function stopClipPreview(silent=false){
   const previewId=clipState.previewId;
   try{
     await recorderApi(`/recorder/preview?action=stop&previewId=${previewId}`,{
-      method:"POST",headers:{"X-FP10-Control":"1"}
+      method:"POST",headers:{"X-Keyestra-Control":"1"}
     });
     if(!silent) setClipStatus("试听已停止。");
   }catch(error){
@@ -1124,7 +1130,7 @@ $("clipPlay").addEventListener("click",async()=>{
   params.set("outputName",$("clipOutput").value);
   try{
     const data=await recorderApi(`/recorder/preview?${params}`,{
-      method:"POST",headers:{"X-FP10-Control":"1"}
+      method:"POST",headers:{"X-Keyestra-Control":"1"}
     });
     clipState.previewId=data.previewId;
     setClipStatus("试听中；滚动录音捕获已暂停。","ok");
@@ -1137,7 +1143,7 @@ $("clipSave").addEventListener("click",async()=>{
   setClipStatus("正在保存精确片段…");
   try{
     const result=await recorderApi(`/recorder/save-range?${selectedClipParams()}`,{
-      method:"POST",headers:{"X-FP10-Control":"1"}
+      method:"POST",headers:{"X-Keyestra-Control":"1"}
     });
     const warnings=result.warnings?.length ? `（${result.warnings.join("、")}）` : "";
     setClipStatus(`已保存 ${result.recording.name}${warnings}`,"ok");
@@ -1156,7 +1162,11 @@ async function pollClipPreview(){
     if(data.outputs?.length){
       const selected=$("clipOutput").value;
       $("clipOutput").innerHTML=data.outputs.map(name=>`<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join("");
-      $("clipOutput").value=data.outputs.includes(selected) ? selected : (data.outputs.find(name=>name.toLowerCase().includes("fp10 mapped")) || data.outputs[0]);
+      $("clipOutput").value=data.outputs.includes(selected)
+        ? selected
+        : (data.outputs.find(name=>name.toLowerCase().includes("keyestra midi"))
+          || data.outputs.find(name=>name.toLowerCase().includes("fp10 mapped"))
+          || data.outputs[0]);
     }
     if(clipState.previewId!=null && preview.previewId===clipState.previewId && preview.state==="playing" && preview.positionUs!=null){
       $("clipPlayhead").style.display="block";
@@ -1184,9 +1194,9 @@ async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-sto
 async function fetchBuildVersion(){
   try{
     const data=await fetch("/version",{cache:"no-store"}).then(response=>response.json());
-    $("buildVersion").textContent=`FP10 Monitor v${data.version} · ${data.build}`;
+    $("buildVersion").textContent=`Keyestra v${data.version} · ${data.build}`;
   }catch(error){
-    $("buildVersion").textContent="FP10 Monitor · 版本未知";
+    $("buildVersion").textContent="Keyestra · 版本未知";
   }
 }
 function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }

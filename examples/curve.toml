@@ -2,7 +2,7 @@
 name = "Roland Digital Piano"
 
 [output]
-name = "FP10 Mapped"
+name = "Keyestra MIDI"
 
 [mapping]
 mode = "piecewise"

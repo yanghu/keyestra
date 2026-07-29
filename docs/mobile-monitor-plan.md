@@ -72,6 +72,7 @@ questions at a glance.
   - `cargo fmt --check`
   - `cargo test`
 - For monitor-server or release-package changes, also run:
-  - `cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server`
+  - `cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor`
 - If release binaries are running, Windows may lock `target/release/*.exe`.
-  Stop the running `fp10-*` processes before deploying over the release build.
+  Stop the running `keyestra-*` and legacy `fp10-*` processes before activating
+  a release build.

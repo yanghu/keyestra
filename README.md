@@ -1,14 +1,20 @@
-# fp10-map
+# Keyestra
 
-`fp10-map` is a small cross-platform MIDI velocity mapping forwarder.
+**Digital Piano Companion**
 
-It reads MIDI from a hardware input such as a Roland FP-10, maps Note On velocity values, and forwards the result to an existing virtual MIDI output such as loopMIDI on Windows or IAC Driver on macOS.
+Keyestra is an open-source companion for digital pianos. It shapes MIDI
+velocity, preserves the rest of the performance stream, reconnects devices,
+monitors playing dynamics and chords, provides a metronome, and keeps a rolling
+MIDI recorder with precise clip preview and export.
+
+It reads MIDI from a hardware input such as a Roland FP-10 and forwards it to an
+existing virtual MIDI output such as loopMIDI on Windows or IAC Driver on macOS.
 
 ```text
-Roland FP-10 -> fp10-map -> FP10 Mapped -> Reaper / DAW / standalone piano
+Roland FP-10 -> keyestra -> Keyestra MIDI -> Reaper / DAW / standalone piano
 ```
 
-The tool does not create virtual MIDI ports. On Windows, create a loopMIDI port first, for example `FP10 Mapped`.
+The tool does not create virtual MIDI ports. On Windows, create a loopMIDI port first, for example `Keyestra MIDI`.
 
 ## Build
 
@@ -19,7 +25,7 @@ cargo build --release
 The executable will be at:
 
 ```text
-target/release/fp10-map.exe
+target/release/keyestra.exe
 ```
 
 ## List MIDI Ports
@@ -33,7 +39,7 @@ cargo run -- --list
 Using names:
 
 ```bash
-cargo run -- --in "Roland FP-10" --out "FP10 Mapped" --curve examples/curve.toml
+cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --curve examples/curve.toml
 ```
 
 Using indexes from `--list`:
@@ -45,13 +51,13 @@ cargo run -- --in 0 --out 0 --curve examples/curve.toml
 Monitor mode:
 
 ```bash
-cargo run -- --in "Roland FP-10" --out "FP10 Mapped" --curve examples/curve.toml --monitor
+cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --curve examples/curve.toml --monitor
 ```
 
 Bypass mode:
 
 ```bash
-cargo run -- --in "Roland FP-10" --out "FP10 Mapped" --bypass
+cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --bypass
 ```
 
 ## Windows Tray Mode
@@ -59,21 +65,21 @@ cargo run -- --in "Roland FP-10" --out "FP10 Mapped" --bypass
 Build the three executables:
 
 ```powershell
-cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
+cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
 ```
 
 `target\release` is Cargo build output, not the permanent installation
 directory. For local development only, the tray can be started from there:
 
 ```powershell
-.\target\release\fp10-map-tray.exe
+.\target\release\keyestra-tray.exe
 ```
 
-The tray app starts `fp10-map.exe` in the background with these defaults:
+The tray app starts `keyestra.exe` in the background with these defaults:
 
 ```text
 input:  Roland Digital Piano
-output: FP10 Mapped
+output: Keyestra MIDI
 curve:  examples/curve.toml
 ```
 
@@ -111,10 +117,10 @@ The deployment script runs formatting and tests, builds all three release
 binaries, and publishes an immutable copy under:
 
 ```text
-%LOCALAPPDATA%\fp10-map\releases\<version>-<build>\
+%LOCALAPPDATA%\keyestra\releases\<version>-<build>\
 ```
 
-It also writes `%LOCALAPPDATA%\fp10-map\current.json` and updates Windows
+It also writes `%LOCALAPPDATA%\keyestra\current.json` and updates Windows
 Startup to the newly deployed tray. Deployment does not stop the currently
 running mapper, tray, or monitor, so it does not clear the recorder's unsaved
 in-memory buffer. The new version becomes active at the next login or after an
@@ -124,9 +130,9 @@ Committed and uncommitted builds are both deployable. Their identities make the
 source state explicit:
 
 ```text
-clean commit:       0.1.0-d137d292
-uncommitted preview: 0.1.0-d137d292-dirty-20260728T231500Z
-Git ID unavailable:  0.1.0-snapshot-20260728T231500Z
+clean commit:         0.2.0-d137d292
+uncommitted preview:  0.2.0-d137d292-dirty-20260728T231500Z
+Git ID unavailable:   0.2.0-snapshot-20260728T231500Z
 ```
 
 The same build identifier is embedded in the binaries, used in the immutable
@@ -140,9 +146,9 @@ To deploy and immediately activate a release:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 -Activate
 ```
 
-Activation stops only the FP10 mapper, tray, and monitor processes, then starts
-the deployed tray. It discards any unsaved rolling recorder buffer, so use it
-only when that interruption is acceptable.
+Activation stops both Keyestra and legacy FP10 mapper, tray, and monitor
+processes, then starts the deployed Keyestra tray. It discards any unsaved
+rolling recorder buffer, so use it only when that interruption is acceptable.
 
 The three executables remain siblings in every deployed release, and the two
 built-in curves are packaged in its `examples` directory. Built-in curve
@@ -153,7 +159,7 @@ To roll Startup back to an earlier installed release without interrupting the
 currently running version:
 
 ```powershell
-& "$env:LOCALAPPDATA\fp10-map\releases\<old-release>\fp10-map-tray.exe" --install-startup
+& "$env:LOCALAPPDATA\keyestra\releases\<old-release>\keyestra-tray.exe" --install-startup
 ```
 
 Exit the current tray and start that older deployed tray only if the rollback
@@ -162,22 +168,34 @@ must take effect immediately. Deployment does not delete prior releases.
 Remove current-user Startup by invoking any deployed tray:
 
 ```powershell
-& "$env:LOCALAPPDATA\fp10-map\releases\<release>\fp10-map-tray.exe" --uninstall-startup
+& "$env:LOCALAPPDATA\keyestra\releases\<release>\keyestra-tray.exe" --uninstall-startup
 ```
 
 The startup entry is a small script at:
 
 ```text
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs
 ```
 
 Logs go to:
 
 ```text
-%APPDATA%\fp10-map\tray.log
+%APPDATA%\keyestra\tray.log
 ```
 
 `tray.log` is capped at 5 MB and retains one rotated backup at `tray.log.1`.
+
+### Migrating from fp10-map
+
+Keyestra uses `Keyestra MIDI` as its default virtual MIDI port. During the
+transition it automatically falls back to the legacy `FP10 Mapped` port when
+the new port is unavailable.
+
+On first launch, Keyestra copies legacy tray settings and saved `.mid`
+recordings from `%APPDATA%\fp10-map` into `%APPDATA%\keyestra`. The old files
+are retained as a backup. Installing Keyestra Startup writes
+`keyestra-tray.vbs` and removes the legacy `fp10-map-tray.vbs` only after the
+new Startup entry has been written.
 
 ## Config
 
@@ -188,7 +206,7 @@ Piecewise mode:
 name = "Roland FP-10"
 
 [output]
-name = "FP10 Mapped"
+name = "Keyestra MIDI"
 
 [mapping]
 mode = "piecewise"
@@ -228,7 +246,7 @@ Velocity `0` is treated as note-off-style passthrough and is not shown as a play
 
 ## Reaper Notes
 
-In Reaper, enable only the virtual mapped input such as `FP10 Mapped`. Do not enable the original `Roland FP-10` input at the same time, or notes may double-trigger.
+In Reaper, enable only the virtual mapped input such as `Keyestra MIDI`. Do not enable the original `Roland FP-10` input at the same time, or notes may double-trigger.
 
 If recorded MIDI still has the original velocity, the track is probably listening to the raw FP-10 input instead of the mapped virtual input.
 
@@ -261,7 +279,7 @@ desktop and phone clients can confirm which monitor binary is serving the UI.
 Recordings are written atomically to:
 
 ```text
-%APPDATA%\fp10-map\recordings
+%APPDATA%\keyestra\recordings
 ```
 
 The files use a fixed high-resolution timing scale and can be imported into
@@ -272,7 +290,7 @@ channel used by the take to prevent stuck notes during playback.
 The rolling buffer currently lives in memory, so restarting the monitor clears
 unsaved material. Saved `.mid` files remain on disk.
 
-Preview runs on the computer and defaults to the `FP10 Mapped` MIDI output.
+Preview runs on the computer and defaults to the `Keyestra MIDI` MIDI output.
 Rolling capture pauses during preview so playback returning through that
 virtual port cannot contaminate the buffer, then resumes shortly after cleanup.
 The live Monitor display can still show those messages. Preview is unavailable
