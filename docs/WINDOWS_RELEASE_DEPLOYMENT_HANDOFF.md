@@ -15,7 +15,7 @@ as part of this work.
 
 ## Confirmed State at Handoff
 
-- Repository: `C:\Users\hueyh\OneDrive\Documents\midi curve`
+- Repository: `<repository-root>`
 - Current commit: `9a9460c` (`Show monitor build version in dashboard`)
 - `target\release` was successfully rebuilt at that commit on July 28, 2026.
 - The monitor build identifies itself as `v0.2.0 · 9a9460c0`.
@@ -33,7 +33,7 @@ as part of this work.
 - At handoff time, that script points directly to:
 
   ```text
-  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\keyestra-tray.exe
+  <repository-root>\target\release\keyestra-tray.exe
   ```
 
 - The tray locates `keyestra.exe` and `keyestra-monitor.exe` as siblings of

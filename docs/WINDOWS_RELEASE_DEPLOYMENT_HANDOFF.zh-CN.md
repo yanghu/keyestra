@@ -16,7 +16,7 @@ Windows 可以锁定正在运行的 `.exe`，但这种锁定绝不能再阻止
 - 仓库路径：
 
   ```text
-  C:\Users\hueyh\OneDrive\Documents\midi curve
+  <repository-root>
   ```
 
 - 当前 commit：`9a9460c`（`Show monitor build version in dashboard`）。
@@ -35,7 +35,7 @@ Windows 可以锁定正在运行的 `.exe`，但这种锁定绝不能再阻止
 - 交接时，该脚本直接指向：
 
   ```text
-  C:\Users\hueyh\OneDrive\Documents\midi curve\target\release\keyestra-tray.exe
+  <repository-root>\target\release\keyestra-tray.exe
   ```
 
 - Tray 会在自身所在目录寻找同级的 `keyestra.exe` 和
