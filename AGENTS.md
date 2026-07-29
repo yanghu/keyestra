@@ -25,15 +25,58 @@ say that live MIDI behavior was not manually tested.
 
 ## Build/Deploy Notes
 
-When the user asks to build, release, or deploy locally, expect Windows to lock
-release binaries if the app is already running from `target\release`. It is OK
-to stop the running `fp10-map`, `fp10-map-tray`, and `fp10-monitor-server`
-processes first, rebuild the three release binaries, then restart
-`target\release\fp10-map-tray.exe`.
+`target\release` is Cargo output, not an installation directory. Normal local
+deployment uses `scripts\deploy-windows.ps1` to publish immutable releases under
+`%LOCALAPPDATA%\fp10-map\releases`. Startup must point to one of those deployed
+versions, never to `target\release`.
 
-When restarting `target\release\fp10-map-tray.exe` from Codex after a release
-build, launch it with elevated permissions. Starting the tray app inside the
-normal sandbox can return immediately without leaving the tray process running.
+Deployment and activation are separate operations. A normal deployment updates
+Startup but does not stop the live FP10 processes or clear the recorder buffer.
+Only use `-Activate` when the user explicitly requests immediate activation and
+accepts losing the unsaved in-memory recorder buffer.
+
+Legacy installations may still be running from `target\release` and lock Cargo
+output. Do not stop them merely to validate a change; ask the user to exit or
+explicitly activate a deployed release first. Once a deployed release is
+running, future release builds must succeed without stopping it.
+
+## Release Identity
+
+`build.rs` derives the monitor build ID from the current Git commit. The monitor
+page footer and `GET /version` combine that ID with the package version from
+`Cargo.toml`.
+
+Any artifact described to the user as a new release, deployed locally, or used
+by Startup must be built from the intended committed source:
+
+- Clean committed releases use the eight-character Git hash as their build ID.
+- Local preview deployments may contain uncommitted changes. Their build ID must
+  include the commit hash, `dirty`, and a UTC timestamp so separate previews
+  never share an immutable release directory.
+- If a Git hash is unavailable, use a timestamped `snapshot` identifier.
+- Do not present a dirty, snapshot, or unknown-source build as a clean committed
+  release; state its source status explicitly.
+- Build all three release binaries after choosing the identity. The embedded
+  build ID, release directory, `current.json`, `/version`, and monitor footer
+  must agree.
+- Before handoff, run the built or deployed monitor on an available port and
+  verify that `GET /version` reports the package version and expected build ID.
+  For a clean build this is the short Git hash; previews include their dirty,
+  snapshot, or unknown-source suffix. Also confirm the served page contains the
+  version footer.
+- A release-profile build used only for validation is not deployed and must be
+  described as validation output.
+
+After every build, release, or deployment requested by the user, include these
+items in the final response:
+
+- the absolute path of the relevant tray binary;
+- the package version, build ID, and source state;
+- the exact footer text the user should see, for example
+  `FP10 Monitor v0.1.0 · 9a9460c0`;
+- whether `/version` was verified from that exact binary;
+- whether the running process and Windows Startup already point to that build,
+  or whether it is only built/staged and still needs activation.
 
 ## MIDI Invariants
 
@@ -54,6 +97,8 @@ normal sandbox can return immediately without leaving the tray process running.
 - `examples/curve.toml` is the default curve path used by examples and tray fallback.
 - The tray app assumes sibling release binaries named `fp10-map.exe` and
   `fp10-monitor-server.exe`.
+- Deployed releases include `examples\curve.toml` and
+  `examples\curve-mid-control.toml` beside the sibling binaries.
 - Startup install writes `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fp10-map-tray.vbs`.
 
 ## Coding Notes

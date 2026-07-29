@@ -56,13 +56,14 @@ cargo run -- --in "Roland FP-10" --out "FP10 Mapped" --bypass
 
 ## Windows Tray Mode
 
-Build both executables:
+Build the three executables:
 
-```bash
-cargo build --release --bin fp10-map --bin fp10-map-tray
+```powershell
+cargo build --release --bin fp10-map --bin fp10-map-tray --bin fp10-monitor-server
 ```
 
-Start the tray app:
+`target\release` is Cargo build output, not the permanent installation
+directory. For local development only, the tray can be started from there:
 
 ```powershell
 .\target\release\fp10-map-tray.exe
@@ -98,16 +99,70 @@ Unexpected mapper crashes use an exponential retry delay from 5 seconds up to
 resets the delay.
 Choosing `Stop mapper` disables retry until you choose `Start mapper` or `Restart mapper`.
 
-Install current-user Windows startup from the command line:
+## Windows Deployment
+
+Deploy the current build for the current Windows user:
 
 ```powershell
-.\target\release\fp10-map-tray.exe --install-startup
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1
 ```
 
-Remove startup:
+The deployment script runs formatting and tests, builds all three release
+binaries, and publishes an immutable copy under:
+
+```text
+%LOCALAPPDATA%\fp10-map\releases\<version>-<build>\
+```
+
+It also writes `%LOCALAPPDATA%\fp10-map\current.json` and updates Windows
+Startup to the newly deployed tray. Deployment does not stop the currently
+running mapper, tray, or monitor, so it does not clear the recorder's unsaved
+in-memory buffer. The new version becomes active at the next login or after an
+explicit activation.
+
+Committed and uncommitted builds are both deployable. Their identities make the
+source state explicit:
+
+```text
+clean commit:       0.1.0-d137d292
+uncommitted preview: 0.1.0-d137d292-dirty-20260728T231500Z
+Git ID unavailable:  0.1.0-snapshot-20260728T231500Z
+```
+
+The same build identifier is embedded in the binaries, used in the immutable
+release directory, written to `current.json`, returned by `/version`, and shown
+in the monitor footer. Timestamped preview identities let you deploy and test
+multiple uncommitted iterations without overwriting an earlier snapshot.
+
+To deploy and immediately activate a release:
 
 ```powershell
-.\target\release\fp10-map-tray.exe --uninstall-startup
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 -Activate
+```
+
+Activation stops only the FP10 mapper, tray, and monitor processes, then starts
+the deployed tray. It discards any unsaved rolling recorder buffer, so use it
+only when that interruption is acceptable.
+
+The three executables remain siblings in every deployed release, and the two
+built-in curves are packaged in its `examples` directory. Built-in curve
+choices saved by an older tray are migrated to the active deployed release;
+an explicit custom curve path remains unchanged.
+
+To roll Startup back to an earlier installed release without interrupting the
+currently running version:
+
+```powershell
+& "$env:LOCALAPPDATA\fp10-map\releases\<old-release>\fp10-map-tray.exe" --install-startup
+```
+
+Exit the current tray and start that older deployed tray only if the rollback
+must take effect immediately. Deployment does not delete prior releases.
+
+Remove current-user Startup by invoking any deployed tray:
+
+```powershell
+& "$env:LOCALAPPDATA\fp10-map\releases\<release>\fp10-map-tray.exe" --uninstall-startup
 ```
 
 The startup entry is a small script at:

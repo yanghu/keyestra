@@ -87,7 +87,8 @@ enum RuntimeState {
     Waiting,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 enum CurveChoice {
     Forum,
     MidControl,
@@ -96,6 +97,9 @@ enum CurveChoice {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct TraySettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    curve_choice: Option<CurveChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     curve: Option<PathBuf>,
 }
 
@@ -674,7 +678,7 @@ fn main() -> Result<()> {
         .or_else(|| {
             load_tray_settings(&settings_path)
                 .ok()
-                .and_then(|settings| settings.curve)
+                .map(resolve_tray_curve)
         })
         .unwrap_or_else(default_curve_path);
     let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log);
@@ -912,6 +916,41 @@ fn curve_choice(path: &Path) -> CurveChoice {
     }
 }
 
+fn resolve_tray_curve(settings: TraySettings) -> PathBuf {
+    match settings.curve_choice {
+        Some(CurveChoice::Forum) => default_curve_path(),
+        Some(CurveChoice::MidControl) => mid_control_curve_path(),
+        Some(CurveChoice::Custom) => settings.curve.unwrap_or_else(default_curve_path),
+        None => match settings.curve {
+            Some(path) => match legacy_builtin_curve_choice(&path) {
+                Some(CurveChoice::Forum) => default_curve_path(),
+                Some(CurveChoice::MidControl) => mid_control_curve_path(),
+                _ => path,
+            },
+            None => default_curve_path(),
+        },
+    }
+}
+
+fn legacy_builtin_curve_choice(path: &Path) -> Option<CurveChoice> {
+    let parent_is_examples = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("examples"));
+    if !parent_is_examples {
+        return None;
+    }
+
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some(name) if name.eq_ignore_ascii_case("curve.toml") => Some(CurveChoice::Forum),
+        Some(name) if name.eq_ignore_ascii_case("curve-mid-control.toml") => {
+            Some(CurveChoice::MidControl)
+        }
+        _ => None,
+    }
+}
+
 fn curve_label(choice: CurveChoice) -> &'static str {
     match choice {
         CurveChoice::Forum => "Forum",
@@ -949,8 +988,10 @@ fn save_tray_settings(path: &Path, curve: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
+    let choice = curve_choice(curve);
     let settings = TraySettings {
-        curve: Some(curve.to_path_buf()),
+        curve_choice: Some(choice),
+        curve: (choice == CurveChoice::Custom).then(|| curve.to_path_buf()),
     };
     let text = toml::to_string_pretty(&settings)?;
     fs::write(path, text)
@@ -971,6 +1012,9 @@ fn startup_script_path() -> Result<PathBuf> {
 fn install_startup() -> Result<()> {
     let exe = env::current_exe()?;
     let script_path = startup_script_path()?;
+    if let Some(parent) = script_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let script = format!(
         "Set shell = CreateObject(\"WScript.Shell\")\r\nshell.Run \"\"\"{}\"\"\", 0, False\r\n",
         exe.display()
@@ -1077,5 +1121,45 @@ mod tests {
         fs::remove_file(path).unwrap();
         fs::remove_file(backup).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_builtin_curve_is_migrated_to_the_current_executable_layout() {
+        let settings = TraySettings {
+            curve_choice: None,
+            curve: Some(
+                PathBuf::from("old-workspace")
+                    .join("examples")
+                    .join("curve-mid-control.toml"),
+            ),
+        };
+
+        assert!(same_path(
+            &resolve_tray_curve(settings),
+            &mid_control_curve_path()
+        ));
+    }
+
+    #[test]
+    fn custom_curve_keeps_its_explicit_path_during_migration() {
+        let custom = PathBuf::from("C:\\Users\\player\\my-curves\\touch.toml");
+        let settings = TraySettings {
+            curve_choice: None,
+            curve: Some(custom.clone()),
+        };
+
+        assert_eq!(resolve_tray_curve(settings), custom);
+    }
+
+    #[test]
+    fn builtin_settings_store_a_choice_instead_of_an_install_path() {
+        let settings = TraySettings {
+            curve_choice: Some(CurveChoice::Forum),
+            curve: None,
+        };
+        let text = toml::to_string_pretty(&settings).unwrap();
+
+        assert!(text.contains("curve_choice = \"forum\""));
+        assert!(!text.contains("curve ="));
     }
 }
