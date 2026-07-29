@@ -1179,6 +1179,14 @@ $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect"
 let pollingTimer = null;
 let eventSource = null;
 async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } }
+async function fetchBuildVersion(){
+  try{
+    const data=await fetch("/version",{cache:"no-store"}).then(response=>response.json());
+    $("buildVersion").textContent=`FP10 Monitor v${data.version} · ${data.build}`;
+  }catch(error){
+    $("buildVersion").textContent="FP10 Monitor · 版本未知";
+  }
+}
 function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }
 function connectEvents(){
   if(!window.EventSource){ startPolling(); return; }
@@ -1186,4 +1194,5 @@ function connectEvents(){
   eventSource.addEventListener("state",(event)=>{ try{ render(JSON.parse(event.data)); } catch(e){} });
   eventSource.onerror = ()=>{ $("status").textContent="reconnecting"; if(eventSource){ eventSource.close(); eventSource=null; } startPolling(); setTimeout(()=>{ if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; } connectEvents(); },2500); };
 }
+fetchBuildVersion();
 connectEvents();

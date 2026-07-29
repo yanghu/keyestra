@@ -159,6 +159,7 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
 .metronome-settings .metronome-output { margin-top:8px; }
 .metronome-error { min-height:18px; margin-top:8px; color:var(--red); font-size:12px; font-weight:750; }
 .mobile-practice { display:none; }
+.build-version { padding:16px 4px 0; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; text-align:center; }
 @media (max-width:860px){ header,.grid,.lower{grid-template-columns:1fr;display:grid;align-items:start;} header{align-items:start;} .tools{justify-content:flex-start;} .raw-row{grid-template-columns:86px 1fr 44px;} code{grid-column:1/-1;} }
 @media (max-width:700px){
   body { background:#fff; }
@@ -245,4 +246,5 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .mobile-details { padding:0 12px; }
   .mobile-details summary { min-height:36px; display:flex; align-items:center; color:var(--accent); font-size:13px; font-weight:800; cursor:pointer; }
   .mobile-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:0 0 12px; }
+  .build-version { padding:8px 4px 2px; order:10; }
 }

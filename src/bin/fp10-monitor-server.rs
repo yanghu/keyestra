@@ -398,6 +398,19 @@ fn handle_client(
             "application/javascript; charset=utf-8",
             MONITOR_JS,
         ),
+        "/version" => {
+            let body = serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "build": env!("FP10_BUILD_ID"),
+            })
+            .to_string();
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+            )
+        }
         "/state" => {
             let json = state
                 .lock()

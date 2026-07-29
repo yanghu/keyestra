@@ -200,6 +200,9 @@ Open the monitor page from the tray menu on a computer or phone to:
   the same range as a standard MIDI file.
 - Download any of the 20 most recently saved `.mid` files.
 
+The bottom of the monitor page shows the package version and Git build ID so
+desktop and phone clients can confirm which monitor binary is serving the UI.
+
 Recordings are written atomically to:
 
 ```text
