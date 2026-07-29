@@ -36,7 +36,15 @@ The current screenshots are:
 
 - `screenshots/keyestra-monitor.png` — the primary performance dashboard;
 - `screenshots/keyestra-recorder.png` — the expanded rolling Recorder and clip
-  editor.
+  editor;
+- `screenshots/keyestra-mobile-live-performance.png` — phone-sized velocity,
+  chord, and metronome controls;
+- `screenshots/keyestra-mobile-rhythm-practice.png` — a completed rhythm
+  practice round;
+- `screenshots/keyestra-mobile-clip-editor.png` — phone-sized clip selection,
+  preview, and save controls;
+- `screenshots/keyestra-mobile-remote.png` — the composed **Perform · Practice ·
+  Capture** image used near the top of the main README.
 
 To refresh them:
 
@@ -47,6 +55,22 @@ To refresh them:
    include the overview, detail timeline, boundary controls, preview, and save
    actions.
 5. Replace the images in `demo/screenshots/` without changing their filenames.
+
+### Mobile README showcase
+
+Use a `430 × 932` browser viewport for the three phone screenshots:
+
+1. **Live performance:** place the Metronome at the top of the viewport and
+   include current feedback, recent velocity, and the current chord.
+2. **Rhythm practice:** choose four rounds, start practice, wait through the
+   count-in, and send the demo phrase. Capture the completed feedback together
+   with the metronome.
+3. **Clip editor:** expand **编辑片段**, choose **30 秒**, and frame the overview,
+   detailed selection, boundary controls, preview, and save button.
+
+`mobile-showcase.html` composes the three phone captures into the `1440 × 720`
+README hero. Open it at that viewport and replace
+`screenshots/keyestra-mobile-remote.png` after refreshing any source image.
 
 These are documentation fixtures, not prerecorded MIDI files. Running the
 example adds events to the active Monitor's in-memory rolling buffer but does

@@ -6,14 +6,24 @@
 
 <p align="center">
   <strong>Digital Piano Companion</strong><br>
-  Expressive velocity shaping, resilient MIDI routing, performance insight,
-  a metronome, and a rolling recorder.
+  Expressive velocity shaping, resilient MIDI routing, and a phone-ready
+  performance companion with practice feedback, a metronome, and a rolling recorder.
 </p>
 
 Keyestra sits between a digital piano and the software instrument or DAW you
 already use. It makes the keyboard's velocity response more expressive while
 preserving the rest of the MIDI performance, then turns the mapped stream into
 useful live feedback and recoverable recordings.
+
+![Keyestra mobile remote showing live velocity feedback, rhythm practice, and clip export](demo/screenshots/keyestra-mobile-remote.png)
+
+Leave the computer with the piano setup and use a phone on the same network as
+the remote:
+
+- **Perform** — see live velocity, dynamics, chords, and the metronome.
+- **Practice** — run phone-first rhythm rounds with early/late feedback.
+- **Capture** — select, preview, and save a precise section from the rolling
+  MIDI recorder.
 
 ```text
 Digital piano
@@ -157,6 +167,10 @@ mobile browsers. It provides:
 - a detailed timeline with pan, zoom, overview, range handles, preview, and
   standard MIDI export;
 - downloads for the 20 most recently saved recordings.
+
+To use a phone as the remote, connect it to the same local network and open
+`http://<computer-ip>:8770`. No phone app is required. If Windows prompts for
+network access, allow Keyestra only on trusted private networks.
 
 ### Rhythm practice
 
