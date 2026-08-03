@@ -633,6 +633,7 @@ fetchPractice();
 setInterval(fetchPractice,180);
 let recorderState = null;
 let recorderBusy = false;
+let cfxRenderState = {available:false,jobs:[]};
 function formatRecorderDuration(milliseconds){
   const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -669,9 +670,59 @@ function renderRecorder(recorder){
     <div class="recorder-file">
       <span title="${escapeAttr(file.name)}">${escapeHtml(file.name)}</span>
       <small>${new Date(Number(file.modifiedMs)).toLocaleString()} · ${formatFileSize(file.size)}</small>
-      <a href="/recordings/download?name=${encodeURIComponent(file.name)}" download>下载</a>
+      <div class="recorder-file-actions">
+        <a href="/recordings/download?name=${encodeURIComponent(file.name)}" download>MIDI</a>
+        ${renderCfxActions(file.name)}
+      </div>
     </div>`).join("") : "<span>还没有保存文件</span>";
 }
+function cfxJob(recordingName,format){
+  return (cfxRenderState.jobs || []).find(job=>job.recordingName===recordingName && job.format===format);
+}
+function cfxFormatStatus(format){
+  return (cfxRenderState.formats || []).find(status=>status.format===format);
+}
+function renderCfxAction(recordingName,format){
+  const job=cfxJob(recordingName,format);
+  const upper=format.toUpperCase();
+  if(job?.state==="ready") return `<a href="/renders/download?name=${encodeURIComponent(recordingName)}&format=${format}" download>${upper} · ${formatFileSize(job.outputSize)}</a>`;
+  const labels={queued:`${upper} 等待`,rendering:`${upper} 渲染中…`,failed:`重试 ${upper}`};
+  const label=labels[job?.state] || `生成 ${upper}`;
+  const status=cfxFormatStatus(format);
+  const disabled=!status?.available || job?.state==="queued" || job?.state==="rendering";
+  const title=job?.error || status?.unavailableReason || `使用 REAPER + CFX 生成 ${upper}`;
+  return `<button type="button" class="cfx-render-button" data-cfx-recording="${escapeAttr(recordingName)}" data-cfx-format="${format}" title="${escapeAttr(title)}" ${disabled ? "disabled" : ""}>${label}</button>`;
+}
+function renderCfxActions(recordingName){
+  return `${renderCfxAction(recordingName,"mp3")}${renderCfxAction(recordingName,"wav")}`;
+}
+async function fetchCfxRenders(){
+  try{
+    cfxRenderState=await fetch("/render/cfx",{cache:"no-store"}).then(response=>response.json());
+    if(recorderState) renderRecorder(recorderState);
+  } catch(error){
+    cfxRenderState={available:false,jobs:[],unavailableReason:"CFX render service offline"};
+  }
+}
+async function startCfxRender(recordingName,format){
+  try{
+    const response=await fetch(`/render/cfx?name=${encodeURIComponent(recordingName)}&format=${format}`,{
+      method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"
+    });
+    const data=await response.json();
+    if(!response.ok || data.error) throw new Error(data.message || data.error || "CFX render failed");
+    $("recorderMessage").textContent="已加入 CFX 渲染队列；可以继续练琴。";
+    $("recorderMessage").classList.add("ok");
+    await fetchCfxRenders();
+  } catch(error){
+    $("recorderMessage").textContent=error.message || "CFX render failed";
+    $("recorderMessage").classList.remove("ok");
+  }
+}
+$("recorderFileList").addEventListener("click",event=>{
+  const button=event.target.closest("[data-cfx-recording]");
+  if(button && !button.disabled) startCfxRender(button.dataset.cfxRecording,button.dataset.cfxFormat);
+});
 async function fetchRecorder(){
   try{ renderRecorder(await fetch("/recorder",{cache:"no-store"}).then(response=>response.json())); }
   catch(e){
@@ -703,7 +754,9 @@ async function recorderAction(button){
 }
 document.querySelectorAll("[data-recorder-action]").forEach(button=>button.addEventListener("click",()=>recorderAction(button)));
 fetchRecorder();
+fetchCfxRenders();
 setInterval(fetchRecorder,1000);
+setInterval(fetchCfxRenders,1000);
 const clipState={
   sessionId:null, availableStartUs:0, availableEndUs:0, viewStartUs:0, viewEndUs:0,
   startUs:null, endUs:null, focus:"start", preset:"all", timeline:null, overview:null,

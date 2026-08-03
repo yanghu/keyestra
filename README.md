@@ -197,6 +197,32 @@ Saved recordings are stored in:
 Preview temporarily pauses rolling capture so playback returning through the
 virtual port cannot be recorded into the buffer.
 
+### Render saved MIDI with REAPER and Garritan CFX
+
+On Windows, each saved MIDI row can render an MP3 for everyday listening or a
+lossless WAV through local REAPER project templates. Keyestra automatically
+looks for:
+
+```text
+%APPDATA%\REAPER\ProjectTemplates\Keyestra CFX Render.rpp
+%APPDATA%\REAPER\ProjectTemplates\Keyestra CFX Render MP3.rpp
+```
+
+The template must contain a track named `CFX Render` with the CFX Concert Grand
+VSTi. Each template's saved REAPER render settings determine the output format,
+quality, normalization, peak ceiling, and render tail. A practical MP3 template
+uses 320 kbps, -18 LUFS-I normalization, and a -1 dB true-peak ceiling. Keep the
+WAV template for lossless exports and later editing.
+
+Click **Generate MP3** or **Generate WAV** beside a saved MIDI. Rendering runs
+in a single-file background queue so the Monitor and rolling recorder remain
+available. The finished file is stored beside the MIDI as `*_natural.mp3` or
+`*_natural.wav`; the source MIDI and reusable templates are not modified.
+
+Keyestra uses the normal REAPER installation at
+`C:\Program Files\REAPER (x64)\reaper.exe`. Custom REAPER or template locations
+can be supplied with the Monitor options documented in [`docs/CLI.md`](docs/CLI.md).
+
 ## Velocity curves
 
 The default curve is [`examples/curve.toml`](examples/curve.toml):

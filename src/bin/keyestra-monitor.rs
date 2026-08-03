@@ -15,6 +15,8 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use midir::{Ignore, MidiInput, MidiInputPort};
 
+#[path = "../cfx_render.rs"]
+mod cfx_render;
 #[path = "../metronome.rs"]
 mod metronome;
 #[path = "../midi_clip.rs"]
@@ -26,6 +28,7 @@ mod practice;
 #[path = "../recorder.rs"]
 mod recorder;
 
+use cfx_render::{CfxRenderConfig, CfxRenderFormat, CfxRenderer};
 use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
 use practice::{Practice, PracticeSettings};
@@ -56,6 +59,21 @@ struct Cli {
 
     #[arg(long, help = "Directory for saved MIDI recordings")]
     recordings_dir: Option<PathBuf>,
+
+    #[arg(long, help = "Path to reaper.exe for CFX audio rendering")]
+    reaper: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Path to the Keyestra CFX WAV Render REAPER project template"
+    )]
+    cfx_template: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Path to the Keyestra CFX MP3 Render REAPER project template"
+    )]
+    cfx_mp3_template: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,7 +266,13 @@ fn main() -> Result<()> {
         .recordings_dir
         .map(Ok)
         .unwrap_or_else(Recorder::default_directory)?;
-    let recorder = Arc::new(Recorder::new(recordings_dir)?);
+    let recorder = Arc::new(Recorder::new(recordings_dir.clone())?);
+    let cfx_renderer = Arc::new(CfxRenderer::new(CfxRenderConfig::discover(
+        recordings_dir,
+        cli.reaper,
+        cli.cfx_template,
+        cli.cfx_mp3_template,
+    )));
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
     let midi_state = Arc::clone(&state);
@@ -291,6 +315,7 @@ fn main() -> Result<()> {
                 let practice = Arc::clone(&practice);
                 let recorder = Arc::clone(&recorder);
                 let preview = Arc::clone(&preview);
+                let cfx_renderer = Arc::clone(&cfx_renderer);
                 let recorder_control = Arc::clone(&recorder_control);
                 thread::spawn(move || {
                     if let Err(error) = handle_client(
@@ -300,6 +325,7 @@ fn main() -> Result<()> {
                         practice,
                         recorder,
                         preview,
+                        cfx_renderer,
                         recorder_control,
                     ) {
                         eprintln!("HTTP error: {}", error);
@@ -385,6 +411,7 @@ fn handle_client(
     practice: Arc<Practice>,
     recorder: Arc<Recorder>,
     preview: Arc<MidiPreview>,
+    cfx_renderer: Arc<CfxRenderer>,
     recorder_control: Arc<Mutex<()>>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
@@ -790,6 +817,88 @@ fn handle_client(
                         None,
                     ),
                 }
+            }
+        }
+        "/render/cfx" => {
+            if method == "GET" {
+                let body = serde_json::to_string(&cfx_renderer.snapshot())?;
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "CFX render mutations must use POST",
+                    None,
+                )
+            } else if !has_control_header {
+                respond_api_error(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid_parameter",
+                    "Missing X-Keyestra-Control: 1 header",
+                    None,
+                )
+            } else if let Some(name) = query_value(query, "name") {
+                let format = query_value(query, "format").unwrap_or_else(|| "mp3".to_string());
+                let Some(format) = CfxRenderFormat::parse(&format) else {
+                    return respond_api_error(
+                        &mut stream,
+                        "400 Bad Request",
+                        "invalid_parameter",
+                        "format must be mp3 or wav",
+                        None,
+                    );
+                };
+                match cfx_renderer.request(&name, format) {
+                    Ok(job) => {
+                        let body = serde_json::json!({ "ok": true, "job": job }).to_string();
+                        respond(
+                            &mut stream,
+                            "202 Accepted",
+                            "application/json; charset=utf-8",
+                            &body,
+                        )
+                    }
+                    Err(error) => respond_api_error(
+                        &mut stream,
+                        "400 Bad Request",
+                        "cfx_render_failed",
+                        &error.to_string(),
+                        None,
+                    ),
+                }
+            } else {
+                respond_api_error(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid_parameter",
+                    "Missing recording name",
+                    None,
+                )
+            }
+        }
+        "/renders/download" => {
+            let format = query_value(query, "format")
+                .as_deref()
+                .and_then(CfxRenderFormat::parse)
+                .unwrap_or(CfxRenderFormat::Mp3);
+            let result = query_value(query, "name")
+                .ok_or_else(|| anyhow::anyhow!("Missing recording name"))
+                .and_then(|name| cfx_renderer.rendered_path(&name, format));
+            match result {
+                Ok(path) => respond_file_download(&mut stream, &path, format.content_type()),
+                Err(error) => respond(
+                    &mut stream,
+                    "404 Not Found",
+                    "text/plain; charset=utf-8",
+                    &error.to_string(),
+                ),
             }
         }
         "/recordings/download" => {
@@ -1465,4 +1574,26 @@ mod tests {
         assert_eq!(settings.count_in_bars, 2);
         assert_eq!(settings.hit_window_ms, 10.0);
     }
+}
+
+fn respond_file_download(
+    stream: &mut TcpStream,
+    path: &std::path::Path,
+    content_type: &str,
+) -> Result<()> {
+    let mut file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Download file name is not valid UTF-8"))?;
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        content_type,
+        name.replace('"', ""),
+        metadata.len()
+    )?;
+    std::io::copy(&mut file, stream)?;
+    Ok(())
 }

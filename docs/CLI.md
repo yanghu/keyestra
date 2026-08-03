@@ -53,3 +53,22 @@ cargo run --bin keyestra-monitor -- `
   --port 8770
 ```
 
+## Override REAPER/CFX rendering paths
+
+The Monitor normally discovers REAPER plus the `Keyestra CFX Render.rpp` WAV
+template and `Keyestra CFX Render MP3.rpp` MP3 template in their standard
+Windows locations. Override any path when using a portable REAPER installation
+or differently named templates:
+
+```powershell
+cargo run --bin keyestra-monitor -- `
+  --in "Keyestra MIDI" `
+  --reaper "D:\Audio\REAPER\reaper.exe" `
+  --cfx-template "D:\Audio\Templates\Keyestra CFX Render.rpp" `
+  --cfx-mp3-template "D:\Audio\Templates\Keyestra CFX Render MP3.rpp"
+```
+
+The template must contain a track named `CFX Render` and the CFX Concert Grand
+VSTi. Keyestra copies the selected template's settings into a per-recording
+render project; it never edits either source template. MP3 is the API default;
+the Monitor UI offers both MP3 and WAV for every saved MIDI.
