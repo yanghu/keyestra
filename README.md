@@ -5,6 +5,10 @@
 <h1 align="center">Keyestra</h1>
 
 <p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <strong>Digital Piano Companion</strong><br>
   Shape your piano's response, understand your playing, and capture performances
   from the computer or your phone.
@@ -45,6 +49,9 @@ virtual MIDI port.
   rhythm, and manage recordings without keeping the computer in front of you.
 - **Rolling recorder** — recover the latest performance, mark Takes, select a
   precise clip, preview it, and export a standard MIDI file.
+- **One-click CFX rendering** — turn a saved MIDI performance into a compact
+  MP3 or lossless WAV through your REAPER and Garritan CFX templates, with the
+  templates controlling normalization, true-peak limits, and render quality.
 - **Resilient Windows Tray** — wait for missing devices, reconnect
   automatically, supervise the mapper, and remember the selected curve.
 
@@ -274,6 +281,7 @@ terminal monitoring, and Monitor host/port options.
 
 ## Documentation
 
+- [简体中文说明](README.zh-CN.md)
 - [Windows deployment and rollback](docs/DEPLOYMENT.md)
 - [Command-line usage](docs/CLI.md)
 - [Recorder and clip-editor design](docs/RECORDER_PREVIEW_DESIGN.md)
