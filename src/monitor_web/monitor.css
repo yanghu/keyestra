@@ -2,6 +2,56 @@
 * { box-sizing:border-box; }
 body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 main { width:min(1280px, calc(100vw - 32px)); margin:0 auto; padding:24px 0 32px; }
+.app-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; width:min(360px,100%); margin:0 auto 16px; padding:4px; border:1px solid var(--line); border-radius:10px; background:#eef2ee; }
+.app-tabs button { min-height:38px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.app-tabs button.active { background:#fff; color:var(--accent); box-shadow:0 1px 5px rgba(24,32,29,.1); }
+.pianoteq-view { display:none; }
+main.piano-mode > :not(.app-tabs):not(.pianoteq-view):not(.build-version) { display:none !important; }
+main.piano-mode > .pianoteq-view { display:block; }
+.pianoteq-panel { max-width:720px; margin:0 auto; }
+.pianoteq-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pianoteq-heading h2 { margin-top:3px; font-size:24px; }
+.pianoteq-eyebrow { color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.14em; }
+.pianoteq-refresh { min-height:36px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 12px; font:inherit; font-weight:850; cursor:pointer; }
+.pianoteq-current { display:grid; gap:4px; margin-top:16px; padding:16px; border-radius:10px; background:var(--accent); color:#fff; }
+.pianoteq-current span,.pianoteq-current small { color:rgba(255,255,255,.76); font-size:12px; font-weight:700; }
+.pianoteq-current strong { font-size:clamp(22px,5vw,34px); line-height:1.12; }
+.pianoteq-sound,.pianoteq-instruments { margin-top:16px; }
+.pianoteq-section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.pianoteq-section-head h3 { margin:0; font-size:14px; }
+.pianoteq-section-head span { display:block; margin-top:2px; color:var(--muted); font-size:11px; font-weight:700; }
+.pianoteq-section-head button { min-height:34px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-section-head .pianoteq-reverb-toggle.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.pianoteq-control-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+.pianoteq-control { min-width:0; padding:9px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
+.pianoteq-control > span { display:block; margin-bottom:7px; color:var(--muted); font-size:11px; font-weight:850; }
+.pianoteq-control > div { display:grid; grid-template-columns:38px minmax(42px,1fr) 38px; align-items:center; gap:4px; }
+.pianoteq-control button { width:38px; height:38px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0; font:inherit; font-size:21px; font-weight:800; cursor:pointer; }
+.pianoteq-control strong { overflow:hidden; font-size:13px; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
+.pianoteq-control button:disabled { opacity:.4; cursor:wait; }
+.pianoteq-more-sound { margin-top:7px; }
+.pianoteq-more-sound summary { min-height:34px; display:flex; align-items:center; color:var(--accent); font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-more-sound .pianoteq-control { max-width:220px; }
+.pianoteq-favorites { margin-top:16px; }
+.pianoteq-favorites h3 { margin:0 0 8px; font-size:13px; }
+.pianoteq-favorites > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+.pianoteq-favorites button { min-height:48px; border:1px solid var(--accent); border-radius:9px; background:#fff; color:var(--accent); padding:8px; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.pianoteq-instrument-search { width:100%; height:42px; margin-bottom:8px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 11px; font:inherit; font-size:14px; }
+.pianoteq-instrument-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:7px; }
+.pianoteq-instrument-list button { min-height:52px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:8px 10px; font:inherit; font-size:13px; font-weight:850; line-height:1.2; text-align:left; cursor:pointer; }
+.pianoteq-instrument-list button.active { border-color:var(--accent); background:var(--soft); color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
+.pianoteq-instrument-list button small { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+.pianoteq-search { display:grid; gap:5px; margin-top:16px; color:var(--muted); font-size:11px; font-weight:850; }
+.pianoteq-search input { width:100%; height:44px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 12px; font:inherit; font-size:15px; }
+.pianoteq-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:52vh; margin-top:10px; overflow:auto; }
+.pianoteq-row { display:grid; grid-template-columns:44px minmax(0,1fr); gap:6px; }
+.pianoteq-row button { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); font:inherit; cursor:pointer; }
+.pianoteq-row .pianoteq-star { color:#a4ada7; font-size:22px; }
+.pianoteq-row .pianoteq-star.active { color:#d49320; }
+.pianoteq-row .pianoteq-load { overflow:hidden; padding:8px 11px; font-size:14px; font-weight:800; text-align:left; text-overflow:ellipsis; white-space:nowrap; }
+.pianoteq-row .pianoteq-load:disabled,.pianoteq-refresh:disabled { opacity:.5; cursor:wait; }
+.pianoteq-empty { padding:22px 12px; border:1px dashed var(--line); border-radius:8px; color:var(--muted); text-align:center; }
+.pianoteq-help { margin-top:12px; color:var(--muted); font-size:12px; line-height:1.5; }
 header { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:16px; }
 .brand-lockup { display:flex; align-items:center; gap:12px; }
 .brand-icon { width:52px; height:52px; flex:0 0 auto; border-radius:11px; }
@@ -173,6 +223,17 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
 @media (max-width:700px){
   body { background:#fff; }
   main { width:100%; padding:8px; display:flex; flex-direction:column; gap:8px; }
+  .app-tabs { position:sticky; top:8px; z-index:20; width:100%; margin:0; order:-10; box-shadow:0 4px 14px rgba(24,32,29,.1); }
+  .pianoteq-view { order:-9; }
+  .pianoteq-panel { padding:12px; box-shadow:none; }
+  .pianoteq-heading h2 { font-size:20px; }
+  .pianoteq-current { margin-top:12px; padding:13px; }
+  .pianoteq-list { max-height:none; }
+  .pianoteq-control-grid { grid-template-columns:1fr; }
+  .pianoteq-control { display:grid; grid-template-columns:minmax(72px,.65fr) 1.35fr; align-items:center; gap:8px; }
+  .pianoteq-control > span { margin:0; }
+  .pianoteq-more-sound .pianoteq-control { max-width:none; }
+  .pianoteq-instrument-list { grid-template-columns:1fr 1fr; }
   header { display:none; }
   h1 { font-size:22px; }
   h2 { font-size:15px; }

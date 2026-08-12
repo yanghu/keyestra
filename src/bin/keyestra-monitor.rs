@@ -3,7 +3,7 @@
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -23,6 +23,8 @@ mod metronome;
 mod midi_clip;
 #[path = "../midi_preview.rs"]
 mod midi_preview;
+#[path = "../pianoteq.rs"]
+mod pianoteq;
 #[path = "../practice.rs"]
 mod practice;
 #[path = "../recorder.rs"]
@@ -31,6 +33,7 @@ mod recorder;
 use cfx_render::{CfxRenderConfig, CfxRenderFormat, CfxRenderer};
 use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
+use pianoteq::PianoteqClient;
 use practice::{Practice, PracticeSettings};
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
@@ -56,6 +59,13 @@ struct Cli {
 
     #[arg(long, default_value = "0.0.0.0", help = "HTTP bind host")]
     host: String,
+
+    #[arg(
+        long,
+        default_value = "127.0.0.1:8081",
+        help = "Pianoteq JSON-RPC host and port"
+    )]
+    pianoteq_rpc: String,
 
     #[arg(long, help = "Directory for saved MIDI recordings")]
     recordings_dir: Option<PathBuf>,
@@ -275,6 +285,7 @@ fn main() -> Result<()> {
     )));
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
+    let pianoteq = Arc::new(PianoteqClient::new(cli.pianoteq_rpc));
     let midi_state = Arc::clone(&state);
     let midi_recorder = Arc::clone(&recorder);
     let midi_metronome = Arc::clone(&metronome);
@@ -317,6 +328,7 @@ fn main() -> Result<()> {
                 let preview = Arc::clone(&preview);
                 let cfx_renderer = Arc::clone(&cfx_renderer);
                 let recorder_control = Arc::clone(&recorder_control);
+                let pianoteq = Arc::clone(&pianoteq);
                 thread::spawn(move || {
                     if let Err(error) = handle_client(
                         stream,
@@ -327,6 +339,7 @@ fn main() -> Result<()> {
                         preview,
                         cfx_renderer,
                         recorder_control,
+                        pianoteq,
                     ) {
                         eprintln!("HTTP error: {}", error);
                     }
@@ -413,6 +426,7 @@ fn handle_client(
     preview: Arc<MidiPreview>,
     cfx_renderer: Arc<CfxRenderer>,
     recorder_control: Arc<Mutex<()>>,
+    pianoteq: Arc<PianoteqClient>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -431,6 +445,7 @@ fn handle_client(
                 && value.trim() == "1"
         })
     });
+    let range_header = request_header(&request, "Range");
 
     match path {
         "/" | "/index.html" => respond(
@@ -475,6 +490,56 @@ fn handle_client(
                 "application/json; charset=utf-8",
                 &body,
             )
+        }
+        "/pianoteq" => {
+            if method == "GET" {
+                let body = serde_json::to_string(&pianoteq.snapshot())?;
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "Pianoteq control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let action = query_value(query, "action").unwrap_or_else(|| "load".to_string());
+                if action == "parameter" {
+                    let id = query_value(query, "id").unwrap_or_default();
+                    let result = query_value(query, "value")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .ok_or_else(|| anyhow::anyhow!("Missing or invalid control value"))
+                        .and_then(|value| pianoteq.set_parameter(&id, value))
+                        .map(|controls| serde_json::json!({"controls": controls}));
+                    result_json_response(&mut stream, result)
+                } else if action == "load" {
+                    let name = query_value(query, "name").unwrap_or_default();
+                    let bank = query_value(query, "bank").unwrap_or_default();
+                    let result = pianoteq
+                        .load_preset(&name, &bank)
+                        .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                    result_json_response(&mut stream, result)
+                } else {
+                    respond(
+                        &mut stream,
+                        "400 Bad Request",
+                        "application/json; charset=utf-8",
+                        &serde_json::json!({"error": "Unknown Pianoteq action"}).to_string(),
+                    )
+                }
+            }
         }
         "/state" => {
             let json = state
@@ -884,6 +949,15 @@ fn handle_client(
             }
         }
         "/renders/download" => {
+            if method != "GET" && method != "HEAD" {
+                return respond_api_error(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "invalid_parameter",
+                    "Render downloads must use GET or HEAD",
+                    None,
+                );
+            }
             let format = query_value(query, "format")
                 .as_deref()
                 .and_then(CfxRenderFormat::parse)
@@ -892,7 +966,13 @@ fn handle_client(
                 .ok_or_else(|| anyhow::anyhow!("Missing recording name"))
                 .and_then(|name| cfx_renderer.rendered_path(&name, format));
             match result {
-                Ok(path) => respond_file_download(&mut stream, &path, format.content_type()),
+                Ok(path) => respond_file_download(
+                    &mut stream,
+                    &path,
+                    format.content_type(),
+                    method == "HEAD",
+                    range_header,
+                ),
                 Err(error) => respond(
                     &mut stream,
                     "404 Not Found",
@@ -929,6 +1009,14 @@ fn split_target(target: &str) -> (&str, &str) {
         Some((path, query)) => (path, query),
         None => (target, ""),
     }
+}
+
+fn request_header<'a>(request: &'a str, desired_name: &str) -> Option<&'a str> {
+    request.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(desired_name)
+            .then(|| value.trim())
+    })
 }
 
 fn query_value(query: &str, desired_key: &str) -> Option<String> {
@@ -1365,6 +1453,23 @@ fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str)
     Ok(())
 }
 
+fn result_json_response(stream: &mut TcpStream, result: Result<serde_json::Value>) -> Result<()> {
+    match result {
+        Ok(value) => respond(
+            stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            &value.to_string(),
+        ),
+        Err(error) => respond(
+            stream,
+            "502 Bad Gateway",
+            "application/json; charset=utf-8",
+            &serde_json::json!({"error": error.to_string()}).to_string(),
+        ),
+    }
+}
+
 fn respond_download(stream: &mut TcpStream, name: &str, body: &[u8]) -> Result<()> {
     write!(
         stream,
@@ -1574,26 +1679,208 @@ mod tests {
         assert_eq!(settings.count_in_bars, 2);
         assert_eq!(settings.hit_window_ms, 10.0);
     }
+
+    #[test]
+    fn request_headers_are_case_insensitive() {
+        let request = "GET / HTTP/1.1\r\nrAnGe: bytes=10-19\r\n\r\n";
+        assert_eq!(request_header(request, "Range"), Some("bytes=10-19"));
+    }
+
+    #[test]
+    fn byte_ranges_support_bounded_open_and_suffix_forms() {
+        assert_eq!(
+            parse_byte_range(Some("bytes=10-19"), 100),
+            Ok(Some(ByteRange { start: 10, end: 19 }))
+        );
+        assert_eq!(
+            parse_byte_range(Some("bytes=90-"), 100),
+            Ok(Some(ByteRange { start: 90, end: 99 }))
+        );
+        assert_eq!(
+            parse_byte_range(Some("bytes=-10"), 100),
+            Ok(Some(ByteRange { start: 90, end: 99 }))
+        );
+        assert_eq!(
+            parse_byte_range(Some("bytes=90-200"), 100),
+            Ok(Some(ByteRange { start: 90, end: 99 }))
+        );
+    }
+
+    #[test]
+    fn invalid_or_unsatisfiable_byte_ranges_are_rejected() {
+        assert_eq!(parse_byte_range(Some("bytes=100-"), 100), Err(()));
+        assert_eq!(parse_byte_range(Some("bytes=20-10"), 100), Err(()));
+        assert_eq!(parse_byte_range(Some("bytes=0-1,5-6"), 100), Err(()));
+        assert_eq!(parse_byte_range(Some("bytes=-0"), 100), Err(()));
+        assert_eq!(parse_byte_range(Some("bytes=0-"), 0), Err(()));
+    }
+
+    #[test]
+    fn file_download_returns_partial_content_and_head_has_no_body() {
+        let partial = capture_file_download(false, Some("bytes=2-4"));
+        let (partial_headers, partial_body) = split_http_response(&partial);
+        assert!(partial_headers.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+        assert!(partial_headers.contains("Accept-Ranges: bytes\r\n"));
+        assert!(partial_headers.contains("Content-Range: bytes 2-4/10\r\n"));
+        assert!(partial_headers.contains("Content-Length: 3\r\n"));
+        assert!(partial_headers.contains("ETag: \""));
+        assert_eq!(partial_body, b"234");
+
+        let head = capture_file_download(true, None);
+        let (head_headers, head_body) = split_http_response(&head);
+        assert!(head_headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(head_headers.contains("Content-Length: 10\r\n"));
+        assert!(head_body.is_empty());
+    }
+
+    fn capture_file_download(head_only: bool, range: Option<&str>) -> Vec<u8> {
+        let path = env::temp_dir().join(format!(
+            "keyestra-download-test-{}-{}.mp3",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::write(&path, b"0123456789").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let reader = thread::spawn(move || {
+            let mut client = TcpStream::connect(address).unwrap();
+            let mut response = Vec::new();
+            client.read_to_end(&mut response).unwrap();
+            response
+        });
+        let (mut server, _) = listener.accept().unwrap();
+        respond_file_download(&mut server, &path, "audio/mpeg", head_only, range).unwrap();
+        drop(server);
+        let response = reader.join().unwrap();
+        fs::remove_file(path).unwrap();
+        response
+    }
+
+    fn split_http_response(response: &[u8]) -> (&str, &[u8]) {
+        let separator = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
+        (
+            std::str::from_utf8(&response[..separator + 4]).unwrap(),
+            &response[separator + 4..],
+        )
+    }
 }
 
 fn respond_file_download(
     stream: &mut TcpStream,
     path: &std::path::Path,
     content_type: &str,
+    head_only: bool,
+    range_header: Option<&str>,
 ) -> Result<()> {
+    stream.set_write_timeout(Some(Duration::from_secs(60)))?;
     let mut file = fs::File::open(path)?;
     let metadata = file.metadata()?;
+    let total_length = metadata.len();
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow::anyhow!("Download file name is not valid UTF-8"))?;
+    let safe_name = name.replace(['"', '\r', '\n'], "");
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let etag = format!("\"{:x}-{:x}\"", total_length, modified);
+
+    let requested_range = match parse_byte_range(range_header, total_length) {
+        Ok(range) => range,
+        Err(()) => {
+            write!(
+                stream,
+                "HTTP/1.1 416 Range Not Satisfiable\r\nAccept-Ranges: bytes\r\nContent-Range: bytes */{}\r\nETag: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                total_length, etag
+            )?;
+            return Ok(());
+        }
+    };
+
+    let (status, start, end, content_length) = match requested_range {
+        Some(range) => (
+            "206 Partial Content",
+            range.start,
+            range.end,
+            range.end - range.start + 1,
+        ),
+        None => ("200 OK", 0, total_length.saturating_sub(1), total_length),
+    };
+    let content_range = requested_range
+        .map(|range| {
+            format!(
+                "Content-Range: bytes {}-{}/{}\r\n",
+                range.start, range.end, total_length
+            )
+        })
+        .unwrap_or_default();
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nCache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\n{}ETag: {}\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status,
         content_type,
-        name.replace('"', ""),
-        metadata.len()
+        safe_name,
+        content_range,
+        etag,
+        content_length
     )?;
-    std::io::copy(&mut file, stream)?;
+    if !head_only && content_length > 0 {
+        file.seek(SeekFrom::Start(start))?;
+        std::io::copy(&mut file.take(end - start + 1), stream)?;
+    }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+fn parse_byte_range(
+    value: Option<&str>,
+    total_length: u64,
+) -> std::result::Result<Option<ByteRange>, ()> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(specification) = value.strip_prefix("bytes=") else {
+        return Ok(None);
+    };
+    if total_length == 0 || specification.contains(',') {
+        return Err(());
+    }
+    let (start, end) = specification.split_once('-').ok_or(())?;
+    if start.is_empty() {
+        let suffix_length = end.parse::<u64>().map_err(|_| ())?;
+        if suffix_length == 0 {
+            return Err(());
+        }
+        let start = total_length.saturating_sub(suffix_length);
+        return Ok(Some(ByteRange {
+            start,
+            end: total_length - 1,
+        }));
+    }
+
+    let start = start.parse::<u64>().map_err(|_| ())?;
+    if start >= total_length {
+        return Err(());
+    }
+    let end = if end.is_empty() {
+        total_length - 1
+    } else {
+        end.parse::<u64>().map_err(|_| ())?.min(total_length - 1)
+    };
+    if end < start {
+        return Err(());
+    }
+    Ok(Some(ByteRange { start, end }))
 }

@@ -124,6 +124,22 @@ http://<电脑 IP>:8770
 - **练习** — 设置速度、每拍音符数和轮数，获得即时早晚反馈与每轮总结。
 - **录音** — 标记 Take、保存最近一段演奏，或精确选择并试听片段后导出。
 
+独立的 **Piano** 标签页可以控制本机 Pianoteq。启动 Pianoteq 时开启只绑定
+localhost 的 JSON-RPC 服务：
+
+```powershell
+& "C:\Program Files\Modartt\Pianoteq 9\Pianoteq 9.exe" --serve 127.0.0.1:8081
+```
+
+Keyestra 会按乐器整理普通和自定义 preset，优先显示已授权的琴，并把常用 preset
+按钮保存在手机浏览器中。Piano 页面还提供适合触控的音量、混响量、Room Size、
+Reverb 开关和 Dynamics 控制；这些调整只改变当前声音，不会另存 preset。
+Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。若 Pianoteq 使用
+其他本机地址，可通过 `keyestra-monitor --pianoteq-rpc <主机:端口>` 指定。
+
+从 Modartt 用户区下载并安装 KIViR 或 Bells/Carillons 免费乐器后，Keyestra 会为
+它们显示 **免费** 标记，并把它们归入可用乐器，而不是未授权的 demo models。
+
 ## 托盘程序的日常使用
 
 右键单击托盘图标可以：

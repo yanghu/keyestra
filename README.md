@@ -138,6 +138,26 @@ The phone layout is organized around three jobs:
 - **Capture** — mark a Take, save a recent range, or select and preview an exact
   section before exporting it.
 
+The separate **Piano** tab can control a local Pianoteq instance. Start
+Pianoteq with its JSON-RPC server bound to localhost:
+
+```powershell
+& "C:\Program Files\Modartt\Pianoteq 9\Pianoteq 9.exe" --serve 127.0.0.1:8081
+```
+
+Keyestra groups presets by instrument, prioritizes licensed instruments, and
+stores favorite preset buttons in the phone browser. The Piano tab also offers
+touch-friendly controls for volume, reverb amount, room size, reverb on/off,
+and dynamics. These controls change the live sound but do not save a new
+preset. Pianoteq's RPC server stays private to the PC; only the existing
+Keyestra Monitor port is exposed to the local network. Use `keyestra-monitor
+--pianoteq-rpc <host:port>` only if Pianoteq uses a different local address.
+
+Free KIViR and Bells/Carillons instruments are shown with a **Free** badge once
+they have been downloaded from the Modartt user area and installed in
+Pianoteq. They are grouped with usable instruments rather than unlicensed demo
+models.
+
 ## Daily use from the Tray
 
 Right-click the Tray icon to:

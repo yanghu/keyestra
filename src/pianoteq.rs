@@ -1,0 +1,381 @@
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
+
+use anyhow::{anyhow, Context, Result};
+use serde::Serialize;
+use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PianoteqPreset {
+    pub name: String,
+    pub bank: String,
+    pub display_name: String,
+    pub instrument: String,
+    pub collection: String,
+    pub license: String,
+    pub license_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PianoteqControl {
+    pub id: String,
+    pub name: String,
+    pub normalized_value: f64,
+    pub text: String,
+    pub unit: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PianoteqSnapshot {
+    pub available: bool,
+    pub current_preset: Option<String>,
+    pub current_instrument: Option<String>,
+    pub presets: Vec<PianoteqPreset>,
+    pub controls: Vec<PianoteqControl>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PianoteqClient {
+    address: String,
+}
+
+impl PianoteqClient {
+    pub fn new(address: String) -> Self {
+        Self { address }
+    }
+
+    pub fn snapshot(&self) -> PianoteqSnapshot {
+        match self.fetch_snapshot() {
+            Ok((current_preset, current_instrument, presets, controls)) => PianoteqSnapshot {
+                available: true,
+                current_preset,
+                current_instrument,
+                presets,
+                controls,
+                error: None,
+            },
+            Err(error) => PianoteqSnapshot {
+                available: false,
+                current_preset: None,
+                current_instrument: None,
+                presets: Vec::new(),
+                controls: Vec::new(),
+                error: Some(error.to_string()),
+            },
+        }
+    }
+
+    pub fn load_preset(&self, name: &str, bank: &str) -> Result<PianoteqSnapshot> {
+        if name.trim().is_empty() {
+            return Err(anyhow!("Preset name cannot be empty"));
+        }
+        self.rpc("loadPreset", json!({ "name": name, "bank": bank }))?;
+        let mut snapshot = self.snapshot();
+        if snapshot.available && snapshot.current_preset.is_none() {
+            snapshot.current_preset = Some(display_name(name, bank));
+        }
+        Ok(snapshot)
+    }
+
+    pub fn set_parameter(&self, id: &str, normalized_value: f64) -> Result<Vec<PianoteqControl>> {
+        const ALLOWED: [&str; 5] = [
+            "volume",
+            "dynamics",
+            "reverb_switch",
+            "reverb_duration",
+            "reverb_mix",
+        ];
+        if !ALLOWED.contains(&id) {
+            return Err(anyhow!("Unsupported Pianoteq control"));
+        }
+        if !normalized_value.is_finite() || !(0.0..=1.0).contains(&normalized_value) {
+            return Err(anyhow!("Pianoteq control value must be between 0 and 1"));
+        }
+        self.rpc(
+            "setParameters",
+            json!({ "list": [{ "id": id, "normalized_value": normalized_value }] }),
+        )?;
+        self.fetch_controls()
+    }
+
+    fn fetch_snapshot(
+        &self,
+    ) -> Result<(
+        Option<String>,
+        Option<String>,
+        Vec<PianoteqPreset>,
+        Vec<PianoteqControl>,
+    )> {
+        let presets = parse_presets(self.rpc("getListOfPresets", json!({}))?);
+        let (current_preset, current_instrument) = self
+            .rpc("getInfo", json!({}))
+            .ok()
+            .map(|value| find_current_preset_info(&value))
+            .unwrap_or_default();
+        let controls = self.fetch_controls().unwrap_or_default();
+        Ok((current_preset, current_instrument, presets, controls))
+    }
+
+    fn fetch_controls(&self) -> Result<Vec<PianoteqControl>> {
+        Ok(parse_controls(self.rpc("getParameters", json!({}))?))
+    }
+
+    fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        let request_body = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": 1
+        })
+        .to_string();
+        let mut addresses = self
+            .address
+            .to_socket_addrs()
+            .with_context(|| format!("Invalid Pianoteq RPC address {}", self.address))?;
+        let address = addresses
+            .next()
+            .ok_or_else(|| anyhow!("Pianoteq RPC address did not resolve"))?;
+        let timeout = Duration::from_secs(2);
+        let mut stream = TcpStream::connect_timeout(&address, timeout)
+            .with_context(|| format!("Pianoteq is not listening on {}", self.address))?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        write!(
+            stream,
+            "POST /jsonrpc HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            self.address,
+            request_body.len(),
+            request_body
+        )?;
+
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response)?;
+        let separator = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .ok_or_else(|| anyhow!("Invalid HTTP response from Pianoteq"))?;
+        let headers = String::from_utf8_lossy(&response[..separator]);
+        let status = headers.lines().next().unwrap_or_default();
+        if !status.contains(" 200 ") {
+            return Err(anyhow!("Pianoteq RPC returned {}", status));
+        }
+        let response: Value = serde_json::from_slice(&response[separator + 4..])
+            .context("Pianoteq returned invalid JSON")?;
+        if let Some(error) = response.get("error") {
+            return Err(anyhow!("Pianoteq RPC error: {}", error));
+        }
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| anyhow!("Pianoteq RPC response has no result"))
+    }
+}
+
+fn parse_presets(value: Value) -> Vec<PianoteqPreset> {
+    let entries = value
+        .as_array()
+        .or_else(|| value.get("presets").and_then(Value::as_array));
+    let mut presets = entries
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            if let Some(name) = entry.as_str() {
+                return Some(PianoteqPreset {
+                    name: name.to_string(),
+                    bank: String::new(),
+                    display_name: name.to_string(),
+                    instrument: "Other".to_string(),
+                    collection: String::new(),
+                    license: String::new(),
+                    license_status: String::new(),
+                });
+            }
+            let name = entry.get("name")?.as_str()?.to_string();
+            let bank = entry
+                .get("bank")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            Some(PianoteqPreset {
+                display_name: display_name(&name, &bank),
+                instrument: entry
+                    .get("instr")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Other")
+                    .to_string(),
+                collection: entry
+                    .get("collection")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                license: entry
+                    .get("license")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                license_status: entry
+                    .get("license_status")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                name,
+                bank,
+            })
+        })
+        .collect::<Vec<_>>();
+    presets.sort_by(|left, right| {
+        left.display_name
+            .to_lowercase()
+            .cmp(&right.display_name.to_lowercase())
+    });
+    presets
+}
+
+fn parse_controls(value: Value) -> Vec<PianoteqControl> {
+    const CONTROL_IDS: [&str; 5] = [
+        "volume",
+        "dynamics",
+        "reverb_switch",
+        "reverb_duration",
+        "reverb_mix",
+    ];
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry.get("id")?.as_str()?;
+            CONTROL_IDS.contains(&id).then(|| PianoteqControl {
+                id: id.to_string(),
+                name: entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(id)
+                    .to_string(),
+                normalized_value: entry
+                    .get("normalized_value")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_default(),
+                text: entry
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                unit: entry
+                    .get("unit")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+        .collect()
+}
+
+fn display_name(name: &str, bank: &str) -> String {
+    if bank.is_empty() {
+        name.to_string()
+    } else {
+        format!("{} / {}", bank, name)
+    }
+}
+
+fn find_current_preset_info(value: &Value) -> (Option<String>, Option<String>) {
+    if let Some(object) = value.as_object() {
+        for key in ["current_preset", "preset_name", "presetName", "preset"] {
+            if let Some(candidate) = object.get(key) {
+                if let Some(name) = candidate.as_str() {
+                    return (Some(name.to_string()), None);
+                }
+                if let Some(name) = candidate.get("name").and_then(Value::as_str) {
+                    let bank = candidate
+                        .get("bank")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let instrument = candidate
+                        .get("instrument")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    return (Some(display_name(name, bank)), instrument);
+                }
+            }
+        }
+        for child in object.values() {
+            let info = find_current_preset_info(child);
+            if info.0.is_some() {
+                return info;
+            }
+        }
+    } else if let Some(array) = value.as_array() {
+        for child in array {
+            let info = find_current_preset_info(child);
+            if info.0.is_some() {
+                return info;
+            }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_list_preserves_bank_for_custom_presets() {
+        let presets = parse_presets(json!([
+            {"name":"Recording", "bank":"My Presets"},
+            {"name":"Steinway D", "bank":""}
+        ]));
+        assert_eq!(presets[0].display_name, "My Presets / Recording");
+        assert_eq!(presets[0].bank, "My Presets");
+        assert_eq!(presets[1].display_name, "Steinway D");
+    }
+
+    #[test]
+    fn preset_list_exposes_license_metadata_for_ui_grouping() {
+        let presets = parse_presets(json!([{
+            "name":"Pleyel 1926",
+            "bank":"",
+            "instr":"Pleyel Model F",
+            "collection":"KIViR",
+            "license":"KIViR",
+            "license_status":"ok"
+        }]));
+        assert_eq!(presets[0].collection, "KIViR");
+        assert_eq!(presets[0].license, "KIViR");
+        assert_eq!(presets[0].license_status, "ok");
+    }
+
+    #[test]
+    fn current_preset_accepts_nested_info_shapes() {
+        assert_eq!(
+            find_current_preset_info(
+                &json!({"info":{"preset":{"name":"Warm", "bank":"Mine", "instrument":"SK-EX"}}})
+            ),
+            (Some("Mine / Warm".to_string()), Some("SK-EX".to_string()))
+        );
+        assert_eq!(
+            find_current_preset_info(&json!([{"preset_name":"Steinway D"}])),
+            (Some("Steinway D".to_string()), None)
+        );
+        assert_eq!(
+            find_current_preset_info(&json!([{"current_preset":{"name":"Player", "bank":""}}])),
+            (Some("Player".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn controls_are_limited_to_the_remote_surface() {
+        let controls = parse_controls(json!([
+            {"id":"volume", "name":"Volume", "normalized_value":0.7, "text":"-1.0", "unit":"dB"},
+            {"id":"hammer_hardness", "name":"Hammer", "normalized_value":0.5, "text":"0", "unit":""}
+        ]));
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].id, "volume");
+    }
+}

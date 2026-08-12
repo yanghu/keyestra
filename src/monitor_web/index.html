@@ -9,6 +9,73 @@
 </head>
 <body>
   <main>
+    <nav class="app-tabs" aria-label="Keyestra 界面">
+      <button type="button" class="active" data-app-tab="monitor">Monitor</button>
+      <button type="button" data-app-tab="piano">Piano</button>
+    </nav>
+    <section class="pianoteq-view" aria-label="Pianoteq Remote">
+      <section class="panel pianoteq-panel">
+        <div class="pianoteq-heading">
+          <div>
+            <div class="pianoteq-eyebrow">PIANOTEQ REMOTE</div>
+            <h2>选择钢琴与 Preset</h2>
+          </div>
+          <button type="button" class="pianoteq-refresh" id="pianoteqRefresh">刷新</button>
+        </div>
+        <div class="pianoteq-current">
+          <span id="pianoteqCurrentInstrument">当前钢琴</span>
+          <strong id="pianoteqCurrent">正在连接…</strong>
+          <small id="pianoteqStatus">Pianoteq 需要以 --serve 127.0.0.1:8081 启动</small>
+        </div>
+        <section class="pianoteq-sound" id="pianoteqSound" hidden>
+          <div class="pianoteq-section-head">
+            <div><h3>常用声音</h3><span>换完 preset 后快速微调</span></div>
+            <button type="button" class="pianoteq-reverb-toggle" id="pianoteqReverbToggle">Reverb</button>
+          </div>
+          <div class="pianoteq-control-grid">
+            <div class="pianoteq-control" data-pianoteq-control="volume">
+              <span>音量</span>
+              <div><button type="button" data-control-step="-0.02">−</button><strong>--</strong><button type="button" data-control-step="0.02">＋</button></div>
+            </div>
+            <div class="pianoteq-control" data-pianoteq-control="reverb_mix">
+              <span>混响量</span>
+              <div><button type="button" data-control-step="-0.04">−</button><strong>--</strong><button type="button" data-control-step="0.04">＋</button></div>
+            </div>
+            <div class="pianoteq-control" data-pianoteq-control="reverb_duration">
+              <span>Room Size</span>
+              <div><button type="button" data-control-step="-0.04">−</button><strong>--</strong><button type="button" data-control-step="0.04">＋</button></div>
+            </div>
+          </div>
+          <details class="pianoteq-more-sound">
+            <summary>更多声音设置</summary>
+            <div class="pianoteq-control" data-pianoteq-control="dynamics">
+              <span>Dynamics</span>
+              <div><button type="button" data-control-step="-0.04">−</button><strong>--</strong><button type="button" data-control-step="0.04">＋</button></div>
+            </div>
+          </details>
+        </section>
+        <section class="pianoteq-favorites" id="pianoteqFavorites" hidden>
+          <h3>常用 Preset</h3>
+          <div id="pianoteqFavoriteButtons"></div>
+        </section>
+        <section class="pianoteq-instruments">
+          <div class="pianoteq-section-head">
+            <div><h3>选择钢琴</h3><span id="pianoteqInstrumentSummary">先选一台琴</span></div>
+            <button type="button" id="pianoteqShowAll" hidden>查看全部</button>
+          </div>
+          <input class="pianoteq-instrument-search" id="pianoteqInstrumentSearch" type="search" placeholder="查找钢琴，例如 SK-EX、Bösendorfer" autocomplete="off" hidden>
+          <div class="pianoteq-instrument-list" id="pianoteqInstrumentList"></div>
+        </section>
+        <label class="pianoteq-search">
+          <span id="pianoteqPresetHeading">这台琴的 Preset</span>
+          <input id="pianoteqSearch" type="search" placeholder="筛选，例如 Recording、Warm、Player" autocomplete="off">
+        </label>
+        <div class="pianoteq-list" id="pianoteqList">
+          <div class="pianoteq-empty">等待 Pianoteq preset 列表</div>
+        </div>
+        <p class="pianoteq-help">先选琴，再点 preset；星标会留在常用区。声音微调不会保存为新 preset。</p>
+      </section>
+    </section>
     <header>
       <div class="brand">
         <div class="brand-lockup">
