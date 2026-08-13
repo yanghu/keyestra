@@ -13,7 +13,30 @@
       <button type="button" class="active" data-app-tab="monitor">Monitor</button>
       <button type="button" data-app-tab="piano">Piano</button>
     </nav>
-    <section class="pianoteq-view" aria-label="Pianoteq Remote">
+    <section class="pianoteq-view" aria-label="Piano Remote">
+      <section class="panel reaper-compare-panel" aria-label="REAPER Piano Compare">
+        <div class="pianoteq-heading">
+          <div>
+            <div class="pianoteq-eyebrow">REAPER PIANO COMPARE</div>
+            <h2>钢琴选择</h2>
+          </div>
+          <button type="button" class="pianoteq-refresh" id="reaperRefresh">刷新</button>
+        </div>
+        <div class="reaper-current">
+          <span>当前钢琴</span>
+          <strong id="reaperCurrent">正在连接…</strong>
+          <small id="reaperStatus">正在检查 REAPER</small>
+        </div>
+        <div class="reaper-piano-grid" id="reaperPianoList"></div>
+        <section class="reaper-ab" id="reaperAb" hidden>
+          <div class="pianoteq-section-head"><div><h3>A/B 对比</h3><span>选择两台琴，然后反复切换</span></div></div>
+          <div class="reaper-ab-pair">
+            <label><span>A</span><select id="reaperPianoA" aria-label="Piano A"></select></label>
+            <label><span>B</span><select id="reaperPianoB" aria-label="Piano B"></select></label>
+          </div>
+          <button type="button" class="reaper-toggle" id="reaperToggle">A ⇄ B</button>
+        </section>
+      </section>
       <section class="panel pianoteq-panel">
         <div class="pianoteq-heading">
           <div>

@@ -1,0 +1,28 @@
+[reaper]
+# This file matches scripts/reaper/keyestra-piano-compare-bootstrap.lua.
+# The bootstrap creates %APPDATA%\keyestra\reaper-pianos.toml when missing.
+address = "127.0.0.1:8080"
+# If the REAPER web interface requires login, uncomment both lines:
+# username = "keyestra"
+# password = "change-me"
+timeout_ms = 800
+
+[[piano]]
+id = "cfx"
+name = "Garritan CFX"
+tracks = ["Garritan CFX"]
+
+[[piano]]
+id = "sk-ex"
+name = "Pianoteq SK-EX"
+tracks = ["Pianoteq SK-EX"]
+
+[[piano]]
+id = "steinway-d"
+name = "Pianoteq Steinway D"
+tracks = ["Pianoteq Steinway D"]
+
+[[piano]]
+id = "280vc"
+name = "Pianoteq Bösendorfer 280VC"
+tracks = ["Pianoteq Bösendorfer 280VC"]

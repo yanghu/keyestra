@@ -222,13 +222,18 @@ $requiredFiles = @(
     "keyestra-tray.exe",
     "keyestra-monitor.exe",
     "examples\curve.toml",
-    "examples\curve-mid-control.toml"
+    "examples\curve-mid-control.toml",
+    "examples\reaper-pianos.toml",
+    "scripts\reaper\keyestra-piano-compare-bootstrap.lua"
 )
 
 if (Test-Path -LiteralPath $releaseDir) {
     Assert-RequiredFiles -Root $releaseDir -RelativePaths $requiredFiles
     foreach ($relativePath in $requiredFiles) {
-        $sourceRoot = if ($relativePath.StartsWith("examples\")) { $workspace } else { $cargoOutput }
+        $sourceRoot = if (
+            $relativePath.StartsWith("examples\") -or
+            $relativePath.StartsWith("scripts\")
+        ) { $workspace } else { $cargoOutput }
         $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceRoot $relativePath)).Hash
         $deployedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $releaseDir $relativePath)).Hash
         if ($sourceHash -ne $deployedHash) {
@@ -244,12 +249,14 @@ else {
 
     try {
         New-Item -ItemType Directory -Path (Join-Path $stagingDir "examples") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $stagingDir "scripts\reaper") -Force | Out-Null
         foreach ($binary in @("keyestra.exe", "keyestra-tray.exe", "keyestra-monitor.exe")) {
             Copy-Item -LiteralPath (Join-Path $cargoOutput $binary) -Destination (Join-Path $stagingDir $binary)
         }
-        foreach ($curve in @("curve.toml", "curve-mid-control.toml")) {
+        foreach ($curve in @("curve.toml", "curve-mid-control.toml", "reaper-pianos.toml")) {
             Copy-Item -LiteralPath (Join-Path $workspace "examples\$curve") -Destination (Join-Path $stagingDir "examples\$curve")
         }
+        Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-bootstrap.lua")
 
         Assert-RequiredFiles -Root $stagingDir -RelativePaths $requiredFiles
         Move-Item -LiteralPath $stagingDir -Destination $releaseDir

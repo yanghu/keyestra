@@ -27,6 +27,8 @@ mod midi_preview;
 mod pianoteq;
 #[path = "../practice.rs"]
 mod practice;
+#[path = "../reaper.rs"]
+mod reaper;
 #[path = "../recorder.rs"]
 mod recorder;
 
@@ -35,6 +37,7 @@ use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
 use pianoteq::PianoteqClient;
 use practice::{Practice, PracticeSettings};
+use reaper::ReaperClient;
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
 const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
@@ -66,6 +69,12 @@ struct Cli {
         help = "Pianoteq JSON-RPC host and port"
     )]
     pianoteq_rpc: String,
+
+    #[arg(
+        long,
+        help = "REAPER Piano Compare TOML config (defaults to %APPDATA%\\keyestra\\reaper-pianos.toml)"
+    )]
+    reaper_config: Option<PathBuf>,
 
     #[arg(long, help = "Directory for saved MIDI recordings")]
     recordings_dir: Option<PathBuf>,
@@ -286,6 +295,7 @@ fn main() -> Result<()> {
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
     let pianoteq = Arc::new(PianoteqClient::new(cli.pianoteq_rpc));
+    let reaper = Arc::new(ReaperClient::discover(cli.reaper_config));
     let midi_state = Arc::clone(&state);
     let midi_recorder = Arc::clone(&recorder);
     let midi_metronome = Arc::clone(&metronome);
@@ -329,6 +339,7 @@ fn main() -> Result<()> {
                 let cfx_renderer = Arc::clone(&cfx_renderer);
                 let recorder_control = Arc::clone(&recorder_control);
                 let pianoteq = Arc::clone(&pianoteq);
+                let reaper = Arc::clone(&reaper);
                 thread::spawn(move || {
                     if let Err(error) = handle_client(
                         stream,
@@ -340,6 +351,7 @@ fn main() -> Result<()> {
                         cfx_renderer,
                         recorder_control,
                         pianoteq,
+                        reaper,
                     ) {
                         eprintln!("HTTP error: {}", error);
                     }
@@ -427,6 +439,7 @@ fn handle_client(
     cfx_renderer: Arc<CfxRenderer>,
     recorder_control: Arc<Mutex<()>>,
     pianoteq: Arc<PianoteqClient>,
+    reaper: Arc<ReaperClient>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -539,6 +552,37 @@ fn handle_client(
                         &serde_json::json!({"error": "Unknown Pianoteq action"}).to_string(),
                     )
                 }
+            }
+        }
+        "/reaper-pianos" => {
+            if method == "GET" {
+                let body = serde_json::to_string(&reaper.snapshot())?;
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "REAPER piano control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let piano_id = query_value(query, "id").unwrap_or_default();
+                let result = reaper
+                    .activate(&piano_id)
+                    .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                result_json_response(&mut stream, result)
             }
         }
         "/state" => {

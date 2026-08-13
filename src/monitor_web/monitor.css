@@ -9,6 +9,22 @@ main { width:min(1280px, calc(100vw - 32px)); margin:0 auto; padding:24px 0 32px
 main.piano-mode > :not(.app-tabs):not(.pianoteq-view):not(.build-version) { display:none !important; }
 main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-panel { max-width:720px; margin:0 auto; }
+.reaper-compare-panel { max-width:720px; margin:0 auto 16px; }
+.reaper-current { display:grid; gap:4px; margin-top:16px; padding:16px; border-radius:10px; background:#162b2b; color:#fff; }
+.reaper-current span,.reaper-current small { color:rgba(255,255,255,.74); font-size:12px; font-weight:700; }
+.reaper-current strong { font-size:clamp(24px,6vw,38px); line-height:1.12; }
+.reaper-current.unavailable { background:#606965; }
+.reaper-piano-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
+.reaper-piano-grid button { min-height:64px; border:2px solid var(--line); border-radius:11px; background:#fff; color:var(--ink); padding:10px; font:inherit; font-size:16px; font-weight:900; line-height:1.15; cursor:pointer; }
+.reaper-piano-grid button.active { border-color:var(--accent); background:var(--accent); color:#fff; box-shadow:0 4px 12px rgba(20,108,108,.2); }
+.reaper-piano-grid button:disabled { cursor:not-allowed; opacity:.46; }
+.reaper-ab { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+.reaper-ab-pair { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.reaper-ab-pair label { display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; overflow:hidden; }
+.reaper-ab-pair label > span { color:var(--accent); font-size:18px; font-weight:950; text-align:center; }
+.reaper-ab-pair select { width:100%; min-width:0; height:48px; border:0; border-left:1px solid var(--line); background:#fff; color:var(--ink); padding:0 8px; font:inherit; font-weight:800; }
+.reaper-toggle { width:100%; min-height:58px; margin-top:9px; border:0; border-radius:10px; background:#162b2b; color:#fff; font:inherit; font-size:19px; font-weight:950; cursor:pointer; }
+.reaper-toggle:disabled { cursor:not-allowed; opacity:.45; }
 .pianoteq-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pianoteq-heading h2 { margin-top:3px; font-size:24px; }
 .pianoteq-eyebrow { color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.14em; }
@@ -226,6 +242,8 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .app-tabs { position:sticky; top:8px; z-index:20; width:100%; margin:0; order:-10; box-shadow:0 4px 14px rgba(24,32,29,.1); }
   .pianoteq-view { order:-9; }
   .pianoteq-panel { padding:12px; box-shadow:none; }
+  .reaper-compare-panel { margin-bottom:8px; padding:12px; box-shadow:none; }
+  .reaper-piano-grid button { min-height:70px; font-size:15px; }
   .pianoteq-heading h2 { font-size:20px; }
   .pianoteq-current { margin-top:12px; padding:13px; }
   .pianoteq-list { max-height:none; }

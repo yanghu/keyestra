@@ -36,6 +36,93 @@ const workingRanges = [
   {min:108,max:127,label:"ff",className:"ff"},
 ];
 const $ = (id) => document.getElementById(id);
+const reaperAbKey = "keyestra-reaper-ab";
+let reaperState = { pianos:[], activePianoId:null, available:false, busy:false, refreshing:false, snapshotKey:null };
+function loadReaperAb(){
+  try { return JSON.parse(localStorage.getItem(reaperAbKey) || "{}") || {}; }
+  catch(error) { return {}; }
+}
+function saveReaperAb(){
+  try { localStorage.setItem(reaperAbKey,JSON.stringify({a:$("reaperPianoA").value,b:$("reaperPianoB").value})); }
+  catch(error) {}
+}
+function renderReaper(data){
+  reaperState.pianos=data.pianos || [];
+  reaperState.activePianoId=data.activePianoId || null;
+  reaperState.available=Boolean(data.available);
+  const active=reaperState.pianos.find(piano=>piano.id===reaperState.activePianoId);
+  $("reaperCurrent").textContent=active?.name || (data.configured ? "选择一台钢琴" : "尚未配置");
+  $("reaperStatus").textContent=data.available
+    ? (data.error || `${reaperState.pianos.length} 台钢琴已就绪`)
+    : (data.error || "REAPER 不可用");
+  $("reaperStatus").title=data.error || "";
+  $("reaperCurrent").parentElement.classList.toggle("unavailable",!data.available);
+  $("reaperPianoList").innerHTML=reaperState.pianos.map(piano=>
+    `<button type="button" class="${piano.id===reaperState.activePianoId?"active":""}" data-reaper-piano="${encodeURIComponent(piano.id)}" ${!data.available||reaperState.busy?"disabled":""}>${escapeHtml(piano.name)}</button>`
+  ).join("") || `<div class="pianoteq-empty">复制示例配置到<br>${escapeHtml(data.configPath || "%APPDATA%\\keyestra\\reaper-pianos.toml")}</div>`;
+  renderReaperAb();
+}
+function renderReaperAb(){
+  const pianos=reaperState.pianos;
+  $("reaperAb").hidden=pianos.length<2;
+  if(pianos.length<2) return;
+  const stored=loadReaperAb();
+  const oldA=$("reaperPianoA").value || stored.a;
+  const oldB=$("reaperPianoB").value || stored.b;
+  const options=pianos.map(piano=>`<option value="${escapeAttr(piano.id)}">${escapeHtml(piano.name)}</option>`).join("");
+  $("reaperPianoA").innerHTML=options;
+  $("reaperPianoB").innerHTML=options;
+  $("reaperPianoA").value=pianos.some(piano=>piano.id===oldA) ? oldA : pianos[0].id;
+  $("reaperPianoB").value=pianos.some(piano=>piano.id===oldB) ? oldB : pianos[1].id;
+  const activeIsA=reaperState.activePianoId===$("reaperPianoA").value;
+  const activeIsB=reaperState.activePianoId===$("reaperPianoB").value;
+  $("reaperToggle").textContent=activeIsA ? `切换到 B · ${$("reaperPianoB").selectedOptions[0].textContent}`
+    : activeIsB ? `切换到 A · ${$("reaperPianoA").selectedOptions[0].textContent}` : "A ⇄ B";
+  $("reaperToggle").disabled=!reaperState.available || reaperState.busy || $("reaperPianoA").value===$("reaperPianoB").value;
+}
+async function fetchReaper(showBusy=false){
+  if(reaperState.busy || reaperState.refreshing) return;
+  reaperState.refreshing=true;
+  if(showBusy) $("reaperRefresh").disabled=true;
+  try{
+    const response=await fetch("/reaper-pianos",{cache:"no-store"});
+    if(!response.ok) throw new Error();
+    const data=await response.json();
+    const snapshotKey=JSON.stringify(data);
+    if(snapshotKey!==reaperState.snapshotKey){
+      reaperState.snapshotKey=snapshotKey;
+      renderReaper(data);
+    }
+  }catch(error){
+    const data={available:false,pianos:reaperState.pianos,error:"Keyestra 后端不可用"};
+    const snapshotKey=JSON.stringify(data);
+    if(snapshotKey!==reaperState.snapshotKey){
+      reaperState.snapshotKey=snapshotKey;
+      renderReaper(data);
+    }
+  }finally{
+    reaperState.refreshing=false;
+    if(showBusy) $("reaperRefresh").disabled=false;
+  }
+}
+async function activateReaperPiano(id){
+  if(!id || reaperState.busy || !reaperState.available) return;
+  reaperState.busy=true;
+  renderReaper({...reaperState,configured:true,error:"正在切换…"});
+  try{
+    const params=new URLSearchParams({id});
+    const response=await fetch(`/reaper-pianos?${params}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "切换失败");
+    reaperState.busy=false;
+    reaperState.snapshotKey=JSON.stringify(data);
+    renderReaper(data);
+  }catch(error){
+    reaperState.busy=false;
+    await fetchReaper();
+    $("reaperStatus").textContent=error.message || "切换失败";
+  }
+}
 const pianoteqFavoritesKey = "keyestra-pianoteq-favorites";
 let pianoteqState = { presets: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, showAll: false };
 function presetKey(preset){ return `${preset.bank || ""}\u0000${preset.name}`; }
@@ -179,8 +266,19 @@ document.querySelectorAll("[data-app-tab]").forEach(button=>button.addEventListe
   document.querySelector("main").classList.toggle("piano-mode",piano);
   document.querySelectorAll("[data-app-tab]").forEach(candidate=>candidate.classList.toggle("active",candidate===button));
   try { localStorage.setItem("keyestra-active-tab",button.dataset.appTab); } catch(error) {}
-  if(piano) fetchPianoteq();
+  if(piano) { fetchReaper(); fetchPianoteq(); }
 }));
+$("reaperRefresh").addEventListener("click",()=>fetchReaper(true));
+$("reaperPianoList").addEventListener("click",event=>{
+  const button=event.target.closest("[data-reaper-piano]");
+  if(button) activateReaperPiano(decodeURIComponent(button.dataset.reaperPiano));
+});
+[$("reaperPianoA"),$("reaperPianoB")].forEach(select=>select.addEventListener("change",()=>{ saveReaperAb(); renderReaperAb(); }));
+$("reaperToggle").addEventListener("click",()=>{
+  const a=$("reaperPianoA").value,b=$("reaperPianoB").value;
+  activateReaperPiano(reaperState.activePianoId===a ? b : a);
+});
+setInterval(()=>{ if(document.querySelector("main").classList.contains("piano-mode")) fetchReaper(); },1500);
 $("pianoteqRefresh").addEventListener("click",fetchPianoteq);
 $("pianoteqSearch").addEventListener("input",renderPianoteqList);
 $("pianoteqInstrumentSearch").addEventListener("input",()=>{ renderPianoteqInstruments(); renderPianoteqList(); });

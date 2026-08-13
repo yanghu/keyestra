@@ -158,6 +158,18 @@ they have been downloaded from the Modartt user area and installed in
 Pianoteq. They are grouped with usable instruments rather than unlicensed demo
 models.
 
+### Compare pianos hosted in REAPER
+
+The **Piano** tab can also switch among preloaded REAPER instrument tracks,
+including sampled pianos such as Garritan CFX and Pianoteq models hosted as
+plug-ins. The selector uses REAPER's built-in web interface locally, confirms
+the resulting mute state, and includes a persistent one-tap A/B toggle. Direct
+Pianoteq RPC control remains available in the same tab.
+
+See [REAPER Piano Compare setup](docs/REAPER_PIANO_COMPARE.md) for the REAPER
+bootstrap ReaScript, one-time plug-in confirmation boundary, project layout,
+web-interface setup, and configurable piano list.
+
 ## Daily use from the Tray
 
 Right-click the Tray icon to:

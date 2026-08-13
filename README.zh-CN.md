@@ -140,6 +140,18 @@ Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。�
 从 Modartt 用户区下载并安装 KIViR 或 Bells/Carillons 免费乐器后，Keyestra 会为
 它们显示 **免费** 标记，并把它们归入可用乐器，而不是未授权的 demo models。
 
+### 对比 REAPER 中托管的钢琴
+
+**Piano** 标签页也可以切换 REAPER 中预先加载的乐器轨道，包括 Garritan
+CFX 等采样钢琴和以插件方式运行的 Pianoteq 型号。选择器通过本机的 REAPER
+Web 界面控制并确认最终静音状态，还提供会保存在手机浏览器中的一键 A/B
+切换。原有的 Pianoteq RPC 控制仍保留在同一标签页中。
+
+REAPER 工程布局、Web 界面和可配置钢琴列表的设置方法请参阅
+[REAPER Piano Compare 设置](docs/REAPER_PIANO_COMPARE.md)。其中包含可重复运行的
+ReaScript bootstrap；它会自动建轨、设置 MIDI/监听/静音并保存标准工程。只有授权、
+采样库位置和厂商插件内部未暴露给 host 的状态需要第一次人工确认。
+
 ## 托盘程序的日常使用
 
 右键单击托盘图标可以：
