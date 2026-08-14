@@ -27,6 +27,10 @@
           <strong id="pianoteqCurrent">正在连接…</strong>
           <small id="pianoteqStatus">Pianoteq 需要以 --serve 127.0.0.1:8081 启动</small>
         </div>
+        <div class="pianoteq-view-mode" role="group" aria-label="Preset 显示范围">
+          <button type="button" class="active" data-pianoteq-view="favorites">只看 Favorites</button>
+          <button type="button" data-pianoteq-view="all">显示全部</button>
+        </div>
         <section class="pianoteq-sound" id="pianoteqSound" hidden>
           <div class="pianoteq-section-head">
             <div><h3>常用声音</h3><span>换完 preset 后快速微调</span></div>
@@ -46,6 +50,17 @@
             </div>
           </details>
         </section>
+        <details class="pianoteq-save" id="pianoteqSave" hidden>
+          <summary>保存当前声音到 Pianoteq</summary>
+          <div class="pianoteq-save-body">
+            <button type="button" id="pianoteqSaveCurrent">保存对当前 Preset 的修改</button>
+            <form id="pianoteqSaveAsForm">
+              <input id="pianoteqSaveAsName" type="text" maxlength="160" placeholder="新的 Preset 名称" autocomplete="off" required>
+              <button type="submit">另存为并加入 Favorites</button>
+            </form>
+            <small id="pianoteqSaveHint">Preset 内容由 Pianoteq 保存；Keyestra 只保存 Favorite 星标。</small>
+          </div>
+        </details>
         <section class="pianoteq-favorites" id="pianoteqFavorites" hidden>
           <h3>常用 Preset</h3>
           <div id="pianoteqFavoriteButtons"></div>
@@ -55,27 +70,29 @@
             <div><h3>Reverb Preset</h3><span id="pianoteqCurrentReverb">当前：--</span></div>
           </div>
           <div class="pianoteq-reverb-favorites" id="pianoteqReverbFavoriteButtons" hidden></div>
-          <details class="pianoteq-reverb-all" open>
+          <details class="pianoteq-reverb-all" id="pianoteqReverbAll" open>
             <summary>选择或管理常用 Reverb</summary>
             <div class="pianoteq-reverb-list" id="pianoteqReverbList"></div>
           </details>
         </section>
-        <section class="pianoteq-instruments">
-          <div class="pianoteq-section-head">
-            <div><h3>选择钢琴</h3><span id="pianoteqInstrumentSummary">先选一台琴</span></div>
-            <button type="button" id="pianoteqShowAll" hidden>查看全部</button>
+        <div id="pianoteqAllPresets" hidden>
+          <section class="pianoteq-instruments">
+            <div class="pianoteq-section-head">
+              <div><h3>选择钢琴</h3><span id="pianoteqInstrumentSummary">先选一台琴</span></div>
+              <button type="button" id="pianoteqShowAll" hidden>查看全部</button>
+            </div>
+            <input class="pianoteq-instrument-search" id="pianoteqInstrumentSearch" type="search" placeholder="查找钢琴，例如 SK-EX、Bösendorfer" autocomplete="off" hidden>
+            <div class="pianoteq-instrument-list" id="pianoteqInstrumentList"></div>
+          </section>
+          <label class="pianoteq-search">
+            <span id="pianoteqPresetHeading">这台琴的 Preset</span>
+            <input id="pianoteqSearch" type="search" placeholder="筛选，例如 Recording、Warm、Player" autocomplete="off">
+          </label>
+          <div class="pianoteq-list" id="pianoteqList">
+            <div class="pianoteq-empty">等待 Pianoteq preset 列表</div>
           </div>
-          <input class="pianoteq-instrument-search" id="pianoteqInstrumentSearch" type="search" placeholder="查找钢琴，例如 SK-EX、Bösendorfer" autocomplete="off" hidden>
-          <div class="pianoteq-instrument-list" id="pianoteqInstrumentList"></div>
-        </section>
-        <label class="pianoteq-search">
-          <span id="pianoteqPresetHeading">这台琴的 Preset</span>
-          <input id="pianoteqSearch" type="search" placeholder="筛选，例如 Recording、Warm、Player" autocomplete="off">
-        </label>
-        <div class="pianoteq-list" id="pianoteqList">
-          <div class="pianoteq-empty">等待 Pianoteq preset 列表</div>
         </div>
-        <p class="pianoteq-help">先选琴，再点 preset；星标会留在常用区。声音微调不会保存为新 preset。</p>
+        <p class="pianoteq-help">星标只由 Keyestra 管理；声音和 Preset 文件始终由 Pianoteq 加载与保存。</p>
       </section>
     </section>
     <header>

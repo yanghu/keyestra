@@ -558,6 +558,13 @@ fn handle_client(
                         .load_reverb_preset(&name, &bank)
                         .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
                     result_json_response(&mut stream, result)
+                } else if action == "save" {
+                    let name = query_value(query, "name").unwrap_or_default();
+                    let bank = query_value(query, "bank").unwrap_or_default();
+                    let result = pianoteq
+                        .save_preset(&name, &bank)
+                        .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                    result_json_response(&mut stream, result)
                 } else if action == "load" {
                     let name = query_value(query, "name").unwrap_or_default();
                     let bank = query_value(query, "bank").unwrap_or_default();

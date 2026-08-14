@@ -41,6 +41,8 @@ pub struct PianoteqControl {
 pub struct PianoteqSnapshot {
     pub available: bool,
     pub current_preset: Option<String>,
+    pub current_preset_name: Option<String>,
+    pub current_preset_bank: Option<String>,
     pub current_instrument: Option<String>,
     pub current_reverb_preset: Option<String>,
     pub presets: Vec<PianoteqPreset>,
@@ -63,6 +65,8 @@ impl PianoteqClient {
         match self.fetch_snapshot() {
             Ok((
                 current_preset,
+                current_preset_name,
+                current_preset_bank,
                 current_instrument,
                 current_reverb_preset,
                 presets,
@@ -71,6 +75,8 @@ impl PianoteqClient {
             )) => PianoteqSnapshot {
                 available: true,
                 current_preset,
+                current_preset_name,
+                current_preset_bank,
                 current_instrument,
                 current_reverb_preset,
                 presets,
@@ -81,6 +87,8 @@ impl PianoteqClient {
             Err(error) => PianoteqSnapshot {
                 available: false,
                 current_preset: None,
+                current_preset_name: None,
+                current_preset_bank: None,
                 current_instrument: None,
                 current_reverb_preset: None,
                 presets: Vec::new(),
@@ -99,6 +107,30 @@ impl PianoteqClient {
         let mut snapshot = self.snapshot();
         if snapshot.available && snapshot.current_preset.is_none() {
             snapshot.current_preset = Some(display_name(name, bank));
+            snapshot.current_preset_name = Some(name.to_string());
+            snapshot.current_preset_bank = Some(bank.to_string());
+        }
+        Ok(snapshot)
+    }
+
+    pub fn save_preset(&self, name: &str, bank: &str) -> Result<PianoteqSnapshot> {
+        let name = name.trim();
+        let bank = bank.trim();
+        if name.is_empty() {
+            return Err(anyhow!("Preset name cannot be empty"));
+        }
+        if bank.is_empty() {
+            return Err(anyhow!("A user preset bank is required"));
+        }
+        self.rpc(
+            "savePreset",
+            json!({ "name": name, "bank": bank, "preset_type": "full" }),
+        )?;
+        let mut snapshot = self.snapshot();
+        if snapshot.available {
+            snapshot.current_preset = Some(display_name(name, bank));
+            snapshot.current_preset_name = Some(name.to_string());
+            snapshot.current_preset_bank = Some(bank.to_string());
         }
         Ok(snapshot)
     }
@@ -156,6 +188,8 @@ impl PianoteqClient {
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
+        Option<String>,
         Vec<PianoteqPreset>,
         Vec<PianoteqReverbPreset>,
         Vec<PianoteqControl>,
@@ -164,7 +198,7 @@ impl PianoteqClient {
         let reverb_presets =
             parse_reverb_presets(self.rpc("getListOfPresets", json!({ "preset_type": "reverb" }))?);
         let info = self.rpc("getInfo", json!({})).ok();
-        let (current_preset, current_instrument) = info
+        let (current_preset, current_preset_name, current_preset_bank, current_instrument) = info
             .as_ref()
             .map(find_current_preset_info)
             .unwrap_or_default();
@@ -172,6 +206,8 @@ impl PianoteqClient {
         let controls = self.fetch_controls().unwrap_or_default();
         Ok((
             current_preset,
+            current_preset_name,
+            current_preset_bank,
             current_instrument,
             current_reverb_preset,
             presets,
@@ -373,12 +409,19 @@ fn display_name(name: &str, bank: &str) -> String {
     }
 }
 
-fn find_current_preset_info(value: &Value) -> (Option<String>, Option<String>) {
+fn find_current_preset_info(
+    value: &Value,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     if let Some(object) = value.as_object() {
         for key in ["current_preset", "preset_name", "presetName", "preset"] {
             if let Some(candidate) = object.get(key) {
                 if let Some(name) = candidate.as_str() {
-                    return (Some(name.to_string()), None);
+                    return (Some(name.to_string()), Some(name.to_string()), None, None);
                 }
                 if let Some(name) = candidate.get("name").and_then(Value::as_str) {
                     let bank = candidate
@@ -389,7 +432,12 @@ fn find_current_preset_info(value: &Value) -> (Option<String>, Option<String>) {
                         .get("instrument")
                         .and_then(Value::as_str)
                         .map(str::to_string);
-                    return (Some(display_name(name, bank)), instrument);
+                    return (
+                        Some(display_name(name, bank)),
+                        Some(name.to_string()),
+                        Some(bank.to_string()),
+                        instrument,
+                    );
                 }
             }
         }
@@ -407,7 +455,7 @@ fn find_current_preset_info(value: &Value) -> (Option<String>, Option<String>) {
             }
         }
     }
-    (None, None)
+    (None, None, None, None)
 }
 
 fn find_current_reverb_preset(value: &Value) -> Option<String> {
@@ -481,15 +529,30 @@ mod tests {
             find_current_preset_info(
                 &json!({"info":{"preset":{"name":"Warm", "bank":"Mine", "instrument":"SK-EX"}}})
             ),
-            (Some("Mine / Warm".to_string()), Some("SK-EX".to_string()))
+            (
+                Some("Mine / Warm".to_string()),
+                Some("Warm".to_string()),
+                Some("Mine".to_string()),
+                Some("SK-EX".to_string())
+            )
         );
         assert_eq!(
             find_current_preset_info(&json!([{"preset_name":"Steinway D"}])),
-            (Some("Steinway D".to_string()), None)
+            (
+                Some("Steinway D".to_string()),
+                Some("Steinway D".to_string()),
+                None,
+                None
+            )
         );
         assert_eq!(
             find_current_preset_info(&json!([{"current_preset":{"name":"Player", "bank":""}}])),
-            (Some("Player".to_string()), None)
+            (
+                Some("Player".to_string()),
+                Some("Player".to_string()),
+                Some(String::new()),
+                None
+            )
         );
     }
 
@@ -501,6 +564,13 @@ mod tests {
             })),
             Some("Piano room 2".to_string())
         );
+    }
+
+    #[test]
+    fn saving_requires_a_name_and_user_bank_before_contacting_pianoteq() {
+        let client = PianoteqClient::new("127.0.0.1:1".to_string());
+        assert!(client.save_preset("", "My Presets").is_err());
+        assert!(client.save_preset("My Sound", "").is_err());
     }
 
     #[test]

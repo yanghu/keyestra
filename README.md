@@ -148,12 +148,14 @@ Pianoteq with its JSON-RPC server bound to localhost:
 Keyestra groups presets by instrument, prioritizes licensed instruments, and
 stores full-preset and reverb-preset favorites in
 `%APPDATA%\keyestra\pianoteq-favorites.json`, shared by every phone and browser
-that opens the same Monitor. The Piano tab also offers touch-friendly controls
-for volume and reverb on/off, plus quick reverb-preset switching. These controls
-change the live sound but do not save a new preset. Pianoteq's RPC server stays
-private to the PC; only the existing Keyestra Monitor port is exposed to the
-local network. Use `keyestra-monitor --pianoteq-rpc <host:port>` only if
-Pianoteq uses a different local address.
+that opens the same Monitor. The list can switch between Favorites-only and all
+presets. The Piano tab also offers touch-friendly controls for volume and
+reverb on/off, plus quick reverb-preset switching. Modified sounds can overwrite
+the current user preset or be saved into Pianoteq's `My Presets` bank under a
+new name; Keyestra only manages the Favorite marker, not the preset contents.
+Pianoteq's RPC server stays private to the PC; only the existing Keyestra
+Monitor port is exposed to the local network. Use `keyestra-monitor
+--pianoteq-rpc <host:port>` only if Pianoteq uses a different local address.
 
 Free KIViR and Bells/Carillons instruments are shown with a **Free** badge once
 they have been downloaded from the Modartt user area and installed in
