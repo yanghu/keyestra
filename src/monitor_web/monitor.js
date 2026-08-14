@@ -1751,15 +1751,54 @@ restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
 let pollingTimer = null;
 let eventSource = null;
+const initialKeyestraBuild=document.body.dataset.keyestraBuild || null;
+let announcedKeyestraBuild=null;
+let serviceWorkerHadController="serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
 async function fetchState(){ try{ const data=await fetch("/state",{cache:"no-store"}).then(r=>r.json()); render(data); } catch(e){ $("status").textContent="backend offline"; } }
 async function fetchBuildVersion(){
   try{
     const data=await fetch("/version",{cache:"no-store"}).then(response=>response.json());
     $("buildVersion").textContent=`Keyestra v${data.version} · ${data.build}`;
+    if(initialKeyestraBuild && data.build!==initialKeyestraBuild) showKeyestraUpdate(data.build);
   }catch(error){
     $("buildVersion").textContent="Keyestra · 版本未知";
   }
 }
+function showKeyestraUpdate(build){
+  if(!build || build===initialKeyestraBuild || build===announcedKeyestraBuild) return;
+  announcedKeyestraBuild=build;
+  $("updateBuild").textContent=`新版本 ${build}`;
+  $("updateBanner").hidden=false;
+}
+async function checkKeyestraUpdate(){
+  await fetchBuildVersion();
+  if("serviceWorker" in navigator && window.isSecureContext){
+    try{
+      const registration=await navigator.serviceWorker.getRegistration("/");
+      if(registration) await registration.update();
+    }catch(error){}
+  }
+}
+function reloadKeyestra(){
+  const url=new URL(window.location.href);
+  url.searchParams.set("_keyestra_reload",Date.now().toString());
+  window.location.replace(url.toString());
+}
+$("updateReload").addEventListener("click",reloadKeyestra);
+if("serviceWorker" in navigator && window.isSecureContext){
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{
+    if(serviceWorkerHadController) checkKeyestraUpdate();
+    else serviceWorkerHadController=true;
+  });
+  navigator.serviceWorker.register("/service-worker.js",{scope:"/",updateViaCache:"none"})
+    .then(registration=>registration.update())
+    .catch(()=>{});
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible") checkKeyestraUpdate();
+});
+window.addEventListener("pageshow",checkKeyestraUpdate);
+window.setInterval(checkKeyestraUpdate,30000);
 function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }
 function connectEvents(){
   if(!window.EventSource){ startPolling(); return; }
@@ -1767,5 +1806,5 @@ function connectEvents(){
   eventSource.addEventListener("state",(event)=>{ try{ render(JSON.parse(event.data)); } catch(e){} });
   eventSource.onerror = ()=>{ $("status").textContent="reconnecting"; if(eventSource){ eventSource.close(); eventSource=null; } startPolling(); setTimeout(()=>{ if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; } connectEvents(); },2500); };
 }
-fetchBuildVersion();
+checkKeyestraUpdate();
 connectEvents();

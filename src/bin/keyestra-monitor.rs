@@ -468,35 +468,41 @@ fn handle_client(
     let range_header = request_header(&request, "Range");
 
     match path {
-        "/" | "/index.html" => respond(
+        "/" | "/index.html" => respond_with_cache(
             &mut stream,
             "200 OK",
             "text/html; charset=utf-8",
-            INDEX_HTML,
+            &render_index_html(),
+            "no-store, max-age=0",
         ),
-        "/assets/monitor.css" => respond(
+        "/service-worker.js" => respond_service_worker(&mut stream, &render_service_worker()),
+        "/assets/monitor.css" => respond_with_cache(
             &mut stream,
             "200 OK",
             "text/css; charset=utf-8",
             MONITOR_CSS,
+            asset_cache_control(query),
         ),
-        "/assets/monitor.js" => respond(
+        "/assets/monitor.js" => respond_with_cache(
             &mut stream,
             "200 OK",
             "application/javascript; charset=utf-8",
             MONITOR_JS,
+            asset_cache_control(query),
         ),
-        "/assets/keyestra-app.svg" => respond(
+        "/assets/keyestra-app.svg" => respond_with_cache(
             &mut stream,
             "200 OK",
             "image/svg+xml; charset=utf-8",
             KEYESTRA_APP_ICON,
+            asset_cache_control(query),
         ),
-        "/assets/keyestra-tray.svg" | "/favicon.svg" => respond(
+        "/assets/keyestra-tray.svg" | "/favicon.svg" => respond_with_cache(
             &mut stream,
             "200 OK",
             "image/svg+xml; charset=utf-8",
             KEYESTRA_TRAY_ICON,
+            asset_cache_control(query),
         ),
         "/version" => {
             let body = serde_json::json!({
@@ -504,11 +510,12 @@ fn handle_client(
                 "build": env!("KEYESTRA_BUILD_ID"),
             })
             .to_string();
-            respond(
+            respond_with_cache(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
                 &body,
+                "no-store, max-age=0",
             )
         }
         "/pianoteq" => {
@@ -1548,15 +1555,52 @@ fn parse_after(line: &str, marker: &str) -> Option<u8> {
 }
 
 fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> Result<()> {
+    respond_with_cache(stream, status, content_type, body, "no-cache")
+}
+
+fn respond_with_cache(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &str,
+    cache_control: &str,
+) -> Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nCache-Control: {}\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         status,
         content_type,
+        cache_control,
         body.as_bytes().len(),
         body
     )?;
     Ok(())
+}
+
+fn respond_service_worker(stream: &mut TcpStream, body: &str) -> Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/javascript; charset=utf-8\r\nCache-Control: no-store, max-age=0\r\nService-Worker-Allowed: /\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.as_bytes().len(),
+        body
+    )?;
+    Ok(())
+}
+
+fn render_index_html() -> String {
+    INDEX_HTML.replace(BUILD_ID_TOKEN, env!("KEYESTRA_BUILD_ID"))
+}
+
+fn render_service_worker() -> String {
+    SERVICE_WORKER.replace(BUILD_ID_TOKEN, env!("KEYESTRA_BUILD_ID"))
+}
+
+fn asset_cache_control(query: &str) -> &'static str {
+    if query_value(query, "v").as_deref() == Some(env!("KEYESTRA_BUILD_ID")) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
 }
 
 fn result_json_response(stream: &mut TcpStream, result: Result<serde_json::Value>) -> Result<()> {
@@ -1730,12 +1774,44 @@ fn escape_json(value: &str) -> String {
 const INDEX_HTML: &str = include_str!("../monitor_web/index.html");
 const MONITOR_CSS: &str = include_str!("../monitor_web/monitor.css");
 const MONITOR_JS: &str = include_str!("../monitor_web/monitor.js");
+const SERVICE_WORKER: &str = include_str!("../monitor_web/service-worker.js");
 const KEYESTRA_APP_ICON: &str = include_str!("../../assets/icons/keyestra-app.svg");
 const KEYESTRA_TRAY_ICON: &str = include_str!("../../assets/icons/keyestra-tray.svg");
+const BUILD_ID_TOKEN: &str = "__KEYESTRA_BUILD_ID__";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn html_shell_embeds_build_and_versions_assets() {
+        let html = render_index_html();
+        let build = env!("KEYESTRA_BUILD_ID");
+        assert!(!html.contains(BUILD_ID_TOKEN));
+        assert!(html.contains(&format!("data-keyestra-build=\"{build}\"")));
+        assert!(html.contains(&format!("monitor.css?v={build}")));
+        assert!(html.contains(&format!("monitor.js?v={build}")));
+    }
+
+    #[test]
+    fn service_worker_is_build_specific_and_claims_clients() {
+        let worker = render_service_worker();
+        assert!(!worker.contains(BUILD_ID_TOKEN));
+        assert!(worker.contains(env!("KEYESTRA_BUILD_ID")));
+        assert!(worker.contains("skipWaiting"));
+        assert!(worker.contains("clients.claim"));
+    }
+
+    #[test]
+    fn only_current_version_assets_are_immutable() {
+        let build = env!("KEYESTRA_BUILD_ID");
+        assert_eq!(
+            asset_cache_control(&format!("v={build}")),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(asset_cache_control("v=older"), "no-cache");
+        assert_eq!(asset_cache_control(""), "no-cache");
+    }
 
     #[test]
     fn default_monitor_input_falls_back_to_the_legacy_port() {

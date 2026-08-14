@@ -4,11 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Keyestra — Digital Piano Companion</title>
-  <link rel="icon" href="/assets/keyestra-tray.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/monitor.css">
+  <link rel="icon" href="/assets/keyestra-tray.svg?v=__KEYESTRA_BUILD_ID__" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/monitor.css?v=__KEYESTRA_BUILD_ID__">
 </head>
-<body>
+<body data-keyestra-build="__KEYESTRA_BUILD_ID__">
   <main>
+    <div class="update-banner" id="updateBanner" hidden>
+      <span>
+        <strong>Keyestra 更新可用</strong>
+        <small id="updateBuild">重新载入以使用新版本</small>
+      </span>
+      <button type="button" id="updateReload">重新载入</button>
+    </div>
     <nav class="app-tabs" aria-label="Keyestra 界面">
       <button type="button" class="active" data-app-tab="monitor">Monitor</button>
       <button type="button" data-app-tab="piano">Piano</button>
@@ -455,6 +462,6 @@
     </section>
     <footer class="build-version" id="buildVersion">Keyestra · 版本未知</footer>
   </main>
-  <script src="/assets/monitor.js"></script>
+  <script src="/assets/monitor.js?v=__KEYESTRA_BUILD_ID__"></script>
 </body>
 </html>

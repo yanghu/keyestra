@@ -129,6 +129,13 @@ Use `ipconfig` on Windows to find the computer's IPv4 address. No phone app is
 required. If Windows asks for network permission, allow Keyestra only on
 trusted private networks.
 
+When served over HTTPS, the Monitor registers a standard Service Worker in the
+browser, including when installed as a PWA. It checks for a new build whenever
+the app returns to the foreground and periodically while it stays open, then shows **Keyestra 更新可用
+→ 重新载入**. The worker does not cache API responses or provide offline mode;
+HTML, version checks, and the worker itself bypass cache, while JavaScript, CSS,
+and icons use build-versioned URLs.
+
 The phone layout is organized around three jobs:
 
 - **Perform** — see the current chord, per-note velocity, dynamic range,
