@@ -25,6 +25,8 @@ mod midi_clip;
 mod midi_preview;
 #[path = "../pianoteq.rs"]
 mod pianoteq;
+#[path = "../pianoteq_favorites.rs"]
+mod pianoteq_favorites;
 #[path = "../practice.rs"]
 mod practice;
 #[path = "../reaper.rs"]
@@ -36,6 +38,7 @@ use cfx_render::{CfxRenderConfig, CfxRenderFormat, CfxRenderer};
 use metronome::{Metronome, MetronomePatch};
 use midi_preview::{MidiPreview, PreviewError, PreviewErrorCode};
 use pianoteq::PianoteqClient;
+use pianoteq_favorites::PianoteqFavoriteStore;
 use practice::{Practice, PracticeSettings};
 use reaper::ReaperClient;
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
@@ -295,6 +298,7 @@ fn main() -> Result<()> {
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
     let pianoteq = Arc::new(PianoteqClient::new(cli.pianoteq_rpc));
+    let pianoteq_favorites = Arc::new(PianoteqFavoriteStore::discover()?);
     let reaper = Arc::new(ReaperClient::discover(cli.reaper_config));
     let midi_state = Arc::clone(&state);
     let midi_recorder = Arc::clone(&recorder);
@@ -339,6 +343,7 @@ fn main() -> Result<()> {
                 let cfx_renderer = Arc::clone(&cfx_renderer);
                 let recorder_control = Arc::clone(&recorder_control);
                 let pianoteq = Arc::clone(&pianoteq);
+                let pianoteq_favorites = Arc::clone(&pianoteq_favorites);
                 let reaper = Arc::clone(&reaper);
                 thread::spawn(move || {
                     if let Err(error) = handle_client(
@@ -351,6 +356,7 @@ fn main() -> Result<()> {
                         cfx_renderer,
                         recorder_control,
                         pianoteq,
+                        pianoteq_favorites,
                         reaper,
                     ) {
                         eprintln!("HTTP error: {}", error);
@@ -439,6 +445,7 @@ fn handle_client(
     cfx_renderer: Arc<CfxRenderer>,
     recorder_control: Arc<Mutex<()>>,
     pianoteq: Arc<PianoteqClient>,
+    pianoteq_favorites: Arc<PianoteqFavoriteStore>,
     reaper: Arc<ReaperClient>,
 ) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
@@ -566,6 +573,40 @@ fn handle_client(
                         &serde_json::json!({"error": "Unknown Pianoteq action"}).to_string(),
                     )
                 }
+            }
+        }
+        "/pianoteq-favorites" => {
+            if method == "GET" {
+                result_json_response(
+                    &mut stream,
+                    pianoteq_favorites
+                        .snapshot()
+                        .and_then(|favorites| serde_json::to_value(favorites).map_err(Into::into)),
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "Pianoteq favorites require GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let kind = query_value(query, "kind").unwrap_or_default();
+                let key = query_value(query, "key").unwrap_or_default();
+                let favorite = query_value(query, "favorite")
+                    .and_then(|value| value.parse::<bool>().ok())
+                    .ok_or_else(|| anyhow::anyhow!("Missing or invalid favorite value"));
+                let result = favorite
+                    .and_then(|favorite| pianoteq_favorites.set(&kind, &key, favorite))
+                    .and_then(|favorites| serde_json::to_value(favorites).map_err(Into::into));
+                result_json_response(&mut stream, result)
             }
         }
         "/reaper-pianos" => {
