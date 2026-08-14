@@ -42,7 +42,9 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-save-body input { min-width:0; height:40px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); padding:0 10px; font:inherit; font-size:13px; }
 .pianoteq-save-body small { color:var(--muted); font-size:11px; line-height:1.4; }
 .pianoteq-favorites,.pianoteq-reverbs { margin-top:16px; }
-.pianoteq-favorites h3 { margin:0 0 8px; font-size:13px; }
+.pianoteq-favorites > summary { min-height:40px; display:flex; align-items:center; gap:7px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; padding:0 10px; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
+.pianoteq-favorites > summary small { min-width:22px; margin-left:auto; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--muted); font-size:10px; text-align:center; }
+.pianoteq-favorites[open] > summary { margin-bottom:8px; }
 .pianoteq-favorites > div,.pianoteq-reverb-favorites { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
 .pianoteq-favorites button,.pianoteq-reverb-favorites button { min-height:48px; border:1px solid var(--accent); border-radius:9px; background:#fff; color:var(--accent); padding:8px; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
 .pianoteq-reverb-favorites [data-pianoteq-reverb].active { background:var(--accent); color:#fff; }
@@ -61,6 +63,7 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-instrument-group:first-child { margin-top:0; padding-top:0; border-top:0; }
 .pianoteq-instrument-group strong { color:var(--ink); font-size:12px; }
 .pianoteq-instrument-group span { min-width:21px; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--muted); text-align:center; font-weight:850; }
+.pianoteq-instrument-group small { margin-left:auto; color:var(--muted); font-size:10px; }
 .pianoteq-access { position:absolute; top:9px; right:8px; border-radius:999px; padding:3px 6px; font-size:9px; font-style:normal; font-weight:900; letter-spacing:.02em; }
 .pianoteq-access.purchased { background:var(--accent); color:#fff; }
 .pianoteq-access.free { background:#fff0c7; color:#8a5700; }

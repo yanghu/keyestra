@@ -37,7 +37,7 @@ const workingRanges = [
 ];
 const $ = (id) => document.getElementById(id);
 function loadPianoteqViewMode(){ try { return localStorage.getItem("keyestra-pianoteq-view")==="all" ? "all" : "favorites"; } catch(error) { return "favorites"; } }
-let pianoteqState = { available: false, presets: [], reverbPresets: [], favorites: [], reverbFavorites: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, currentPresetName: null, currentPresetBank: null, currentReverbPreset: null, showAll: false, viewMode: loadPianoteqViewMode() };
+let pianoteqState = { available: false, presets: [], reverbPresets: [], favorites: [], reverbFavorites: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, currentPresetName: null, currentPresetBank: null, currentReverbPreset: null, showAll: false, viewMode: loadPianoteqViewMode(), renderedViewMode: null };
 function presetKey(preset){ return `${preset.bank || ""}\u0000${preset.name}`; }
 function compactPianoteqPresetName(preset){
   const names=pianoteqState.presets.filter(candidate=>candidate.instrument===preset.instrument).map(candidate=>candidate.name.split(" "));
@@ -106,6 +106,10 @@ function renderPianoteqViewMode(){
   const favoritesOnly=pianoteqState.viewMode==="favorites";
   $("pianoteqAllPresets").hidden=favoritesOnly;
   $("pianoteqReverbAll").hidden=favoritesOnly;
+  if(pianoteqState.renderedViewMode!==pianoteqState.viewMode){
+    $("pianoteqFavorites").open=favoritesOnly;
+    pianoteqState.renderedViewMode=pianoteqState.viewMode;
+  }
 }
 function renderPianoteqSave(){
   const canOverwrite=Boolean(pianoteqState.currentPresetName && pianoteqState.currentPresetBank);
@@ -174,7 +178,7 @@ function renderPianoteqInstruments(){
   const current=instruments.filter(instrument=>instrument.name===pianoteqState.currentInstrument);
   const primary=hasAvailable ? [...purchased,...free] : current;
   const instrumentQuery=$("pianoteqInstrumentSearch").value.trim().toLowerCase();
-  const visible=(pianoteqState.showAll ? instruments : primary).filter(instrument=>instrument.name.toLowerCase().includes(instrumentQuery));
+  const visible=(pianoteqState.showAll ? instruments : primary).filter(instrument=>`${instrument.name} ${instrument.collection}`.toLowerCase().includes(instrumentQuery));
   if(!visible.some(instrument=>instrument.name===pianoteqState.selectedInstrument)) {
     pianoteqState.selectedInstrument=(visible.find(instrument=>instrument.name===pianoteqState.currentInstrument) || visible[0])?.name || null;
   }
@@ -182,14 +186,21 @@ function renderPianoteqInstruments(){
   $("pianoteqShowAll").textContent=pianoteqState.showAll ? "隐藏 Demo" : `包含 Demo (${demos.length})`;
   $("pianoteqInstrumentSearch").hidden=instruments.length<8;
   $("pianoteqInstrumentSummary").textContent=hasAvailable ? `${purchased.length} 台已购买 · ${free.length} 台免费` : `当前琴 · 另有 ${Math.max(0,instruments.length-1)} 台 Demo`;
-  const sections=[
-    {access:"purchased",label:"已购买",items:visible.filter(instrument=>instrument.access==="purchased")},
-    {access:"free",label:"免费乐器",items:visible.filter(instrument=>instrument.access==="free")},
-    {access:"demo",label:"Demo",items:visible.filter(instrument=>instrument.access==="demo")},
-  ];
-  $("pianoteqInstrumentList").innerHTML=sections.filter(section=>section.items.length).map(section=>
-    `<div class="pianoteq-instrument-group ${section.access}"><strong>${section.label}</strong><span>${section.items.length}</span></div>${section.items.map(instrument=>`<button type="button" class="${instrument.name===pianoteqState.selectedInstrument?"active":""}" data-pianoteq-instrument="${encodeURIComponent(instrument.name)}"><strong>${escapeHtml(instrument.name)}</strong><small>${escapeHtml(instrument.collection)} · ${instrument.count} 个 preset${instrument.name===pianoteqState.currentInstrument?" · 当前":""}</small><em class="pianoteq-access ${instrument.access}">${instrument.access==="purchased"?"Purchased":instrument.access==="free"?"Free":"Demo"}</em></button>`).join("")}`
-  ).join("");
+  const collectionPriority=["Acoustic Piano","Piano Predecessor","Historical Piano"];
+  const collections=[...new Set(visible.map(instrument=>instrument.collection))].sort((left,right)=>{
+    const leftRank=collectionPriority.indexOf(left);
+    const rightRank=collectionPriority.indexOf(right);
+    if(leftRank>=0 || rightRank>=0) return (leftRank<0?collectionPriority.length:leftRank)-(rightRank<0?collectionPriority.length:rightRank);
+    return left.localeCompare(right);
+  });
+  const collectionLabel=collection=>({"Acoustic Piano":"Acoustic Pianos","Piano Predecessor":"Piano Predecessors","Historical Piano":"Historical Pianos"}[collection] || collection);
+  $("pianoteqInstrumentList").innerHTML=collections.map(collection=>{
+    const items=visible.filter(instrument=>instrument.collection===collection);
+    const accessCounts={purchased:0,free:0,demo:0};
+    items.forEach(instrument=>accessCounts[instrument.access]+=1);
+    const accessSummary=[accessCounts.purchased?`${accessCounts.purchased} purchased`:"",accessCounts.free?`${accessCounts.free} free`:"",accessCounts.demo?`${accessCounts.demo} demo`:""].filter(Boolean).join(" · ");
+    return `<div class="pianoteq-instrument-group"><strong>${escapeHtml(collectionLabel(collection))}</strong><span>${items.length}</span><small>${accessSummary}</small></div>${items.map(instrument=>`<button type="button" class="${instrument.name===pianoteqState.selectedInstrument?"active":""}" data-pianoteq-instrument="${encodeURIComponent(instrument.name)}"><strong>${escapeHtml(instrument.name)}</strong><small>${instrument.count} 个 preset${instrument.name===pianoteqState.currentInstrument?" · 当前":""}</small><em class="pianoteq-access ${instrument.access}">${instrument.access==="purchased"?"Purchased":instrument.access==="free"?"Free":"Demo"}</em></button>`).join("")}`;
+  }).join("");
 }
 function renderPianoteqList(){
   const favorites=pianoteqState.favorites;
@@ -205,6 +216,7 @@ function renderPianoteqList(){
     return `<div class="pianoteq-row"><button type="button" class="pianoteq-star ${favoriteSet.has(key)?"active":""}" data-pianoteq-favorite="${encoded}" aria-label="切换常用">★</button><button type="button" class="pianoteq-load" data-pianoteq-load="${encoded}" title="${escapeAttr(preset.displayName)}" ${pianoteqState.busy?"disabled":""}>${escapeHtml(compactPianoteqPresetName(preset))}</button></div>`;
   }).join("") + (filtered.length>visible.length ? `<div class="pianoteq-empty">显示前 ${visible.length} / ${filtered.length} 项，请继续输入以缩小范围</div>` : "") : `<div class="pianoteq-empty">${pianoteqState.presets.length ? "没有匹配的 preset" : "Pianoteq 未连接，或没有返回 preset"}</div>`;
   const favoritePresets=favorites.map(key=>pianoteqState.presets.find(preset=>presetKey(preset)===key)).filter(Boolean);
+  $("pianoteqFavoriteCount").textContent=String(favoritePresets.length);
   $("pianoteqFavorites").hidden=!favoritePresets.length && pianoteqState.viewMode!=="favorites";
   $("pianoteqFavoriteButtons").innerHTML=favoritePresets.length ? favoritePresets.map(preset=>`<div class="pianoteq-row"><button type="button" class="pianoteq-star active" data-pianoteq-favorite="${encodeURIComponent(presetKey(preset))}" aria-label="取消 Favorite Preset">★</button><button type="button" data-pianoteq-load="${encodeURIComponent(presetKey(preset))}" ${pianoteqState.busy?"disabled":""}>${escapeHtml(preset.displayName)}</button></div>`).join("") : `<div class="pianoteq-empty">还没有 Favorite Preset；切到“显示全部”后点星标添加。</div>`;
 }

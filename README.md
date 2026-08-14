@@ -158,11 +158,11 @@ Pianoteq's RPC server stays private to the PC; only the existing Keyestra
 Monitor port is exposed to the local network. Use `keyestra-monitor
 --pianoteq-rpc <host:port>` only if Pianoteq uses a different local address.
 
-Installed instruments reported as usable by Pianoteq are grouped as
-**Purchased** or **Free** from Pianoteq's license metadata. Their collection
-(for example Acoustic Piano, Historical Piano, or Piano Predecessor) is shown
-on each card. Unlicensed instruments remain in a separate **Demo** group that
-can be included on demand.
+Installed instruments are grouped by Pianoteq collection, such as **Acoustic
+Pianos**, **Historical Pianos**, and **Piano Predecessors**. Each card is marked
+**Purchased** or **Free** from Pianoteq's license metadata. Unlicensed
+instruments remain hidden until **Include Demo** is selected, then appear in
+their respective collection with a **Demo** badge.
 
 ### Compare pianos hosted in REAPER
 
