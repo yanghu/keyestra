@@ -75,6 +75,77 @@ The bootstrap supplies these four tracks automatically. If you extend or build
 the project manually, follow the same rules. Before saving, leave exactly one
 configured piano unmuted.
 
+## Calibrate piano loudness
+
+Use
+[`scripts/reaper/keyestra-piano-compare-calibrate.lua`](../scripts/reaper/keyestra-piano-compare-calibrate.lua)
+after the plug-in sounds, mic mixes, and presets are final. Load it once from
+**Actions > Show action list > New action > Load ReaScript**, then run it with
+the canonical Piano Compare project active.
+
+The calibrator uses REAPER's native dry-run renderer, so it needs no SWS,
+ffmpeg, or other external tool. It temporarily adds the same roughly
+30-second MIDI sequence to every tagged piano, covering velocities 40, 55, 70,
+85, 100, and 115. It measures LUFS-I and True Peak through the master, then
+deletes the temporary items and restores track mute, solo, selection, cursor,
+and render settings.
+
+The quietest measured piano becomes the reference. The script only proposes
+cuts to the other piano groups, preserving headroom and preserving the internal
+balance of a piano that owns multiple tagged tracks. A report is shown before
+anything is changed. Choose **Yes** to multiply the existing track faders by
+the proposed constant corrections, or **No** to keep a measurement-only run.
+Applied changes are one REAPER undo step, and the script asks before saving the
+project. The bootstrap does not reset these faders when rerun.
+
+Before calibrating, release all notes and the sustain pedal. Do not change a
+plug-in's output control, preset, mic balance, master FX, or the REAPER master
+fader afterward without recalibrating. Finish with a blind A/B check; a final
+subjective adjustment of about 0.5 dB can still be appropriate because equal
+LUFS does not guarantee identical perceived loudness for different spectra and
+decay envelopes.
+
+## Create the fixed-MIDI benchmark project
+
+Keep `Keyestra Piano Compare.rpp` as the canonical live-playing project. Save
+it after plug-in setup and calibration. For repeatable listening tests, open
+that clean saved project and run
+[`scripts/reaper/keyestra-piano-benchmark-bootstrap.lua`](../scripts/reaper/keyestra-piano-benchmark-bootstrap.lua).
+When prompted, select `maestro-v3.0.0.csv` from an extracted MAESTRO v3.0.0
+MIDI-only download. The script saves a separate project at:
+
+```text
+%APPDATA%\REAPER\Projects\Keyestra\Keyestra Piano Benchmark.rpp
+```
+
+The benchmark reuses the canonical project's four loaded instruments and
+fader calibration. It adds one silent-master MIDI source track, routes that
+track to every tagged piano, and creates these fixed regions:
+
+- **A — Chopin, Nocturne Op. 9 No. 2:** about 35 seconds for lyrical p–mf,
+  voicing, and treble sweetness;
+- **B — Debussy, Des pas sur la neige:** about 29 seconds for pp response,
+  resonance, and decay;
+- **C — Chopin, Nocturne Op. 48 No. 1:** about 30 seconds from the loud section
+  for bass, projection, and high-register harshness; and
+- **D — Scriabin, Etude Op. 8 No. 10:** 25 seconds for speed, attack, and
+  clarity under dense playing.
+
+The excerpts retain MAESTRO's original event timing, key velocities, and
+continuous pedal data. Each region initializes controller state, ends with a
+pedal/all-notes-off reset, and includes a release-tail area. The selected MIDI,
+metadata, license, and attribution are copied to
+`%APPDATA%\REAPER\Media\Keyestra\MAESTRO v3.0.0`, so the saved project does not
+depend on the Downloads folder.
+
+Region A becomes the initial loop selection. Turn on REAPER **Repeat** and press
+Play. Switch the phone's Piano A/B control during the four-second release tail,
+so the newly selected (previously muted) instrument receives the next pass from
+its beginning with the correct note and pedal state. To test a different
+passage, double-click its region before playback. Rerunning the script updates
+its tagged source track and regions without rebuilding the third-party
+plug-ins.
+
 ## 2. Enable REAPER web control
 
 In REAPER, open **Options > Preferences > Control/OSC/web**, add a **Web browser

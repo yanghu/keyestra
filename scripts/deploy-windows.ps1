@@ -224,7 +224,9 @@ $requiredFiles = @(
     "examples\curve.toml",
     "examples\curve-mid-control.toml",
     "examples\reaper-pianos.toml",
-    "scripts\reaper\keyestra-piano-compare-bootstrap.lua"
+    "scripts\reaper\keyestra-piano-compare-bootstrap.lua",
+    "scripts\reaper\keyestra-piano-compare-calibrate.lua",
+    "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua"
 )
 
 if (Test-Path -LiteralPath $releaseDir) {
@@ -257,6 +259,8 @@ else {
             Copy-Item -LiteralPath (Join-Path $workspace "examples\$curve") -Destination (Join-Path $stagingDir "examples\$curve")
         }
         Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-bootstrap.lua")
+        Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-calibrate.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-calibrate.lua")
+        Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua")
 
         Assert-RequiredFiles -Root $stagingDir -RelativePaths $requiredFiles
         Move-Item -LiteralPath $stagingDir -Destination $releaseDir

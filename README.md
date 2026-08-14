@@ -168,7 +168,9 @@ Pianoteq RPC control remains available in the same tab.
 
 See [REAPER Piano Compare setup](docs/REAPER_PIANO_COMPARE.md) for the REAPER
 bootstrap ReaScript, one-time plug-in confirmation boundary, project layout,
-web-interface setup, and configurable piano list.
+web-interface setup, configurable piano list, and repeatable LUFS-I loudness
+calibration. It also includes a fixed-MIDI MAESTRO benchmark project for
+repeatable listening comparisons that do not depend on live performance.
 
 ## Daily use from the Tray
 

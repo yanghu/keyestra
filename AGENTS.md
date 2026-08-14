@@ -103,7 +103,8 @@ items in the final response:
 - Deployed releases include `examples\curve.toml` and
   `examples\curve-mid-control.toml` beside the sibling binaries, plus
   `examples\reaper-pianos.toml` as the REAPER Piano Compare config template and
-  `scripts\reaper\keyestra-piano-compare-bootstrap.lua` for automated setup.
+  the bootstrap, calibration, and MAESTRO benchmark scripts under
+  `scripts\reaper` for automated setup.
 - Startup install writes `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs`.
 - Legacy settings and recordings are copied from `%APPDATA%\fp10-map` on first
   use; source files are retained.
