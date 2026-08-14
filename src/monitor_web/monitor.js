@@ -122,6 +122,25 @@ function renderPianoteqControls(){
   $("pianoteqReverbToggle").classList.toggle("active",Number(reverb?.normalizedValue || 0)>=0.5);
   $("pianoteqReverbToggle").textContent=Number(reverb?.normalizedValue || 0)>=0.5 ? "Reverb On" : "Reverb Off";
   $("pianoteqReverbToggle").disabled=pianoteqState.busy || !reverb;
+  renderPianoteqReverbQuick();
+}
+function favoriteReverbPresets(){
+  return pianoteqState.reverbFavorites.map(key=>pianoteqState.reverbPresets.find(preset=>presetKey(preset)===key)).filter(Boolean);
+}
+function renderPianoteqReverbQuick(){
+  const favorites=favoriteReverbPresets();
+  const current=favorites.find(preset=>preset.displayName===pianoteqState.currentReverbPreset);
+  $("pianoteqReverbQuickName").textContent=current?.displayName || (favorites.length ? "选择 Favorite" : "还没有 Favorite");
+  $("pianoteqReverbQuickName").title=current?.displayName || "";
+  $("pianoteqReverbPrevious").disabled=pianoteqState.busy || !favorites.length;
+  $("pianoteqReverbNext").disabled=pianoteqState.busy || !favorites.length;
+}
+function stepFavoriteReverb(direction){
+  const favorites=favoriteReverbPresets();
+  if(!favorites.length || pianoteqState.busy) return;
+  const currentIndex=favorites.findIndex(preset=>preset.displayName===pianoteqState.currentReverbPreset);
+  const nextIndex=currentIndex<0 ? (direction>0 ? 0 : favorites.length-1) : (currentIndex+direction+favorites.length)%favorites.length;
+  loadPianoteqReverb(presetKey(favorites[nextIndex]));
 }
 function renderPianoteqReverbs(){
   const presets=pianoteqState.reverbPresets;
@@ -205,6 +224,7 @@ async function setPianoteqFavorite(kind,key){
     pianoteqState.reverbFavorites=Array.isArray(data.reverb) ? data.reverb : [];
     renderPianoteqList();
     renderPianoteqReverbs();
+    renderPianoteqReverbQuick();
     renderPianoteqViewMode();
     return true;
   }catch(error){ $("pianoteqStatus").textContent=error.message || "Favorite 保存失败"; return false; }
@@ -339,6 +359,8 @@ $("pianoteqReverbToggle").addEventListener("click",()=>{
   const control=pianoteqState.controls.find(candidate=>candidate.id==="reverb_switch");
   if(control) setPianoteqParameter(control.id,Number(control.normalizedValue)>=0.5 ? 0 : 1);
 });
+$("pianoteqReverbPrevious").addEventListener("click",()=>stepFavoriteReverb(-1));
+$("pianoteqReverbNext").addEventListener("click",()=>stepFavoriteReverb(1));
 $("pianoteqSaveCurrent").addEventListener("click",()=>{
   if(pianoteqState.currentPresetName && pianoteqState.currentPresetBank) savePianoteqPreset(pianoteqState.currentPresetName,pianoteqState.currentPresetBank,false);
 });

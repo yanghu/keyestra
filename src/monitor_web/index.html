@@ -41,14 +41,15 @@
               <span>音量</span>
               <div><button type="button" data-volume-step="-1" aria-label="音量降低 1 dB">−</button><strong>--</strong><button type="button" data-volume-step="1" aria-label="音量提高 1 dB">＋</button></div>
             </div>
-          </div>
-          <details class="pianoteq-more-sound">
-            <summary>更多声音设置</summary>
             <div class="pianoteq-control" data-pianoteq-control="dynamics">
               <span>Dynamics</span>
               <div><button type="button" data-control-step="-0.04">−</button><strong>--</strong><button type="button" data-control-step="0.04">＋</button></div>
             </div>
-          </details>
+            <div class="pianoteq-control pianoteq-reverb-quick">
+              <span>Favorite Reverb</span>
+              <div><button type="button" id="pianoteqReverbPrevious" aria-label="上一个 Favorite Reverb">‹</button><strong id="pianoteqReverbQuickName">--</strong><button type="button" id="pianoteqReverbNext" aria-label="下一个 Favorite Reverb">›</button></div>
+            </div>
+          </div>
         </section>
         <details class="pianoteq-save" id="pianoteqSave" hidden>
           <summary>保存当前声音到 Pianoteq</summary>
