@@ -18,6 +18,14 @@ pub struct PianoteqPreset {
     pub license_status: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PianoteqReverbPreset {
+    pub name: String,
+    pub bank: String,
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PianoteqControl {
@@ -34,7 +42,9 @@ pub struct PianoteqSnapshot {
     pub available: bool,
     pub current_preset: Option<String>,
     pub current_instrument: Option<String>,
+    pub current_reverb_preset: Option<String>,
     pub presets: Vec<PianoteqPreset>,
+    pub reverb_presets: Vec<PianoteqReverbPreset>,
     pub controls: Vec<PianoteqControl>,
     pub error: Option<String>,
 }
@@ -51,11 +61,20 @@ impl PianoteqClient {
 
     pub fn snapshot(&self) -> PianoteqSnapshot {
         match self.fetch_snapshot() {
-            Ok((current_preset, current_instrument, presets, controls)) => PianoteqSnapshot {
+            Ok((
+                current_preset,
+                current_instrument,
+                current_reverb_preset,
+                presets,
+                reverb_presets,
+                controls,
+            )) => PianoteqSnapshot {
                 available: true,
                 current_preset,
                 current_instrument,
+                current_reverb_preset,
                 presets,
+                reverb_presets,
                 controls,
                 error: None,
             },
@@ -63,7 +82,9 @@ impl PianoteqClient {
                 available: false,
                 current_preset: None,
                 current_instrument: None,
+                current_reverb_preset: None,
                 presets: Vec::new(),
+                reverb_presets: Vec::new(),
                 controls: Vec::new(),
                 error: Some(error.to_string()),
             },
@@ -80,6 +101,32 @@ impl PianoteqClient {
             snapshot.current_preset = Some(display_name(name, bank));
         }
         Ok(snapshot)
+    }
+
+    pub fn load_reverb_preset(&self, name: &str, bank: &str) -> Result<PianoteqSnapshot> {
+        if name.trim().is_empty() {
+            return Err(anyhow!("Reverb preset name cannot be empty"));
+        }
+        self.rpc(
+            "loadPreset",
+            json!({ "name": name, "bank": bank, "preset_type": "reverb" }),
+        )?;
+        let mut snapshot = self.snapshot();
+        if snapshot.available && snapshot.current_reverb_preset.is_none() {
+            snapshot.current_reverb_preset = Some(display_name(name, bank));
+        }
+        Ok(snapshot)
+    }
+
+    pub fn set_volume_db(&self, value_db: f64) -> Result<Vec<PianoteqControl>> {
+        if !value_db.is_finite() || !(-60.0..=12.0).contains(&value_db) {
+            return Err(anyhow!("Pianoteq volume must be between -60 and +12 dB"));
+        }
+        self.rpc(
+            "setParameters",
+            json!({ "list": [{ "id": "volume", "text": format!("{value_db:.1}") }] }),
+        )?;
+        self.fetch_controls()
     }
 
     pub fn set_parameter(&self, id: &str, normalized_value: f64) -> Result<Vec<PianoteqControl>> {
@@ -108,17 +155,29 @@ impl PianoteqClient {
     ) -> Result<(
         Option<String>,
         Option<String>,
+        Option<String>,
         Vec<PianoteqPreset>,
+        Vec<PianoteqReverbPreset>,
         Vec<PianoteqControl>,
     )> {
         let presets = parse_presets(self.rpc("getListOfPresets", json!({}))?);
-        let (current_preset, current_instrument) = self
-            .rpc("getInfo", json!({}))
-            .ok()
-            .map(|value| find_current_preset_info(&value))
+        let reverb_presets =
+            parse_reverb_presets(self.rpc("getListOfPresets", json!({ "preset_type": "reverb" }))?);
+        let info = self.rpc("getInfo", json!({})).ok();
+        let (current_preset, current_instrument) = info
+            .as_ref()
+            .map(find_current_preset_info)
             .unwrap_or_default();
+        let current_reverb_preset = info.as_ref().and_then(find_current_reverb_preset);
         let controls = self.fetch_controls().unwrap_or_default();
-        Ok((current_preset, current_instrument, presets, controls))
+        Ok((
+            current_preset,
+            current_instrument,
+            current_reverb_preset,
+            presets,
+            reverb_presets,
+            controls,
+        ))
     }
 
     fn fetch_controls(&self) -> Result<Vec<PianoteqControl>> {
@@ -236,6 +295,36 @@ fn parse_presets(value: Value) -> Vec<PianoteqPreset> {
     presets
 }
 
+fn parse_reverb_presets(value: Value) -> Vec<PianoteqReverbPreset> {
+    let entries = value
+        .as_array()
+        .or_else(|| value.get("presets").and_then(Value::as_array));
+    entries
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            if let Some(name) = entry.as_str() {
+                return Some(PianoteqReverbPreset {
+                    name: name.to_string(),
+                    bank: String::new(),
+                    display_name: name.to_string(),
+                });
+            }
+            let name = entry.get("name")?.as_str()?.to_string();
+            let bank = entry
+                .get("bank")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            Some(PianoteqReverbPreset {
+                display_name: display_name(&name, &bank),
+                name,
+                bank,
+            })
+        })
+        .collect()
+}
+
 fn parse_controls(value: Value) -> Vec<PianoteqControl> {
     const CONTROL_IDS: [&str; 5] = [
         "volume",
@@ -321,6 +410,31 @@ fn find_current_preset_info(value: &Value) -> (Option<String>, Option<String>) {
     (None, None)
 }
 
+fn find_current_reverb_preset(value: &Value) -> Option<String> {
+    if let Some(object) = value.as_object() {
+        if let Some(reverb) = object
+            .get("mini_presets")
+            .and_then(|presets| presets.get("reverb"))
+        {
+            if let Some(name) = reverb.as_str() {
+                return Some(name.to_string());
+            }
+            if let Some(name) = reverb.get("name").and_then(Value::as_str) {
+                let bank = reverb
+                    .get("bank")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                return Some(display_name(name, bank));
+            }
+        }
+        object.values().find_map(find_current_reverb_preset)
+    } else {
+        value
+            .as_array()
+            .and_then(|array| array.iter().find_map(find_current_reverb_preset))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +466,16 @@ mod tests {
     }
 
     #[test]
+    fn reverb_presets_preserve_names_and_banks() {
+        let presets = parse_reverb_presets(json!([
+            {"name":"Piano room 2", "bank":""},
+            {"name":"My Hall", "bank":"My Presets"}
+        ]));
+        assert_eq!(presets[0].display_name, "Piano room 2");
+        assert_eq!(presets[1].display_name, "My Presets / My Hall");
+    }
+
+    #[test]
     fn current_preset_accepts_nested_info_shapes() {
         assert_eq!(
             find_current_preset_info(
@@ -366,6 +490,16 @@ mod tests {
         assert_eq!(
             find_current_preset_info(&json!([{"current_preset":{"name":"Player", "bank":""}}])),
             (Some("Player".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn current_reverb_preset_accepts_pianoteq_info_shape() {
+        assert_eq!(
+            find_current_reverb_preset(&json!({
+                "current_preset": {"mini_presets": {"reverb": "Piano room 2"}}
+            })),
+            Some("Piano room 2".to_string())
         );
     }
 

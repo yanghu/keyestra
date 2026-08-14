@@ -537,6 +537,20 @@ fn handle_client(
                         .and_then(|value| pianoteq.set_parameter(&id, value))
                         .map(|controls| serde_json::json!({"controls": controls}));
                     result_json_response(&mut stream, result)
+                } else if action == "volume" {
+                    let result = query_value(query, "value")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .ok_or_else(|| anyhow::anyhow!("Missing or invalid volume value"))
+                        .and_then(|value| pianoteq.set_volume_db(value))
+                        .map(|controls| serde_json::json!({"controls": controls}));
+                    result_json_response(&mut stream, result)
+                } else if action == "reverb" {
+                    let name = query_value(query, "name").unwrap_or_default();
+                    let bank = query_value(query, "bank").unwrap_or_default();
+                    let result = pianoteq
+                        .load_reverb_preset(&name, &bank)
+                        .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                    result_json_response(&mut stream, result)
                 } else if action == "load" {
                     let name = query_value(query, "name").unwrap_or_default();
                     let bank = query_value(query, "bank").unwrap_or_default();
