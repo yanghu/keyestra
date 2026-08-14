@@ -1,0 +1,7 @@
+# Keep text files identical across Windows, WSL, and CI.
+* text=auto eol=lf
+
+# Never apply line-ending conversion to binary assets.
+*.ico binary
+*.png binary
+*.rgba binary
