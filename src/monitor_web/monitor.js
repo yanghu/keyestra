@@ -49,22 +49,27 @@ function compactPianoteqPresetName(preset){
   return preset.bank ? `${preset.bank} / ${label}` : label;
 }
 function activePianoteqPreset(preset){ return Boolean(preset.licenseStatus) && !["demo","unlicensed","none"].includes(preset.licenseStatus.toLowerCase()); }
-function freePianoteqPreset(preset){ return /kivir|bells?\s*(and|&)?\s*carillons?/i.test(`${preset.collection || ""} ${preset.license || ""}`); }
+function pianoteqPresetAccess(preset){
+  if(!activePianoteqPreset(preset)) return "demo";
+  return String(preset.license || "").trim() ? "purchased" : "free";
+}
 function pianoteqInstruments(){
   const groups=new Map();
   pianoteqState.presets.forEach(preset=>{
     const instrument=preset.instrument || "Other";
-    const group=groups.get(instrument) || {name:instrument,count:0,owned:false,free:false};
+    const group=groups.get(instrument) || {name:instrument,count:0,access:"demo",collection:preset.collection || "Other"};
     group.count+=1;
-    group.free ||= activePianoteqPreset(preset) && freePianoteqPreset(preset);
-    group.owned ||= activePianoteqPreset(preset) && !freePianoteqPreset(preset);
+    const access=pianoteqPresetAccess(preset);
+    if(access==="purchased" || (access==="free" && group.access==="demo")) group.access=access;
+    if(!group.collection && preset.collection) group.collection=preset.collection;
     groups.set(instrument,group);
   });
   return [...groups.values()].sort((left,right)=>{
     if(left.name===pianoteqState.currentInstrument) return -1;
     if(right.name===pianoteqState.currentInstrument) return 1;
-    if(left.owned!==right.owned) return left.owned ? -1 : 1;
-    if(left.free!==right.free) return left.free ? -1 : 1;
+    const rank={purchased:0,free:1,demo:2};
+    if(rank[left.access]!==rank[right.access]) return rank[left.access]-rank[right.access];
+    if(left.collection!==right.collection) return left.collection.localeCompare(right.collection);
     return left.name.localeCompare(right.name);
   });
 }
@@ -162,21 +167,29 @@ function renderPianoteqReverbs(){
 }
 function renderPianoteqInstruments(){
   const instruments=pianoteqInstruments();
-  const owned=instruments.filter(instrument=>instrument.owned);
-  const free=instruments.filter(instrument=>instrument.free && !instrument.owned);
-  const hasAvailable=owned.length>0 || free.length>0;
+  const purchased=instruments.filter(instrument=>instrument.access==="purchased");
+  const free=instruments.filter(instrument=>instrument.access==="free");
+  const demos=instruments.filter(instrument=>instrument.access==="demo");
+  const hasAvailable=purchased.length>0 || free.length>0;
   const current=instruments.filter(instrument=>instrument.name===pianoteqState.currentInstrument);
-  const primary=hasAvailable ? [...owned,...free] : current;
+  const primary=hasAvailable ? [...purchased,...free] : current;
   const instrumentQuery=$("pianoteqInstrumentSearch").value.trim().toLowerCase();
   const visible=(pianoteqState.showAll ? instruments : primary).filter(instrument=>instrument.name.toLowerCase().includes(instrumentQuery));
   if(!visible.some(instrument=>instrument.name===pianoteqState.selectedInstrument)) {
     pianoteqState.selectedInstrument=(visible.find(instrument=>instrument.name===pianoteqState.currentInstrument) || visible[0])?.name || null;
   }
-  $("pianoteqShowAll").hidden=primary.length===instruments.length;
-  $("pianoteqShowAll").textContent=pianoteqState.showAll ? (hasAvailable ? "只看可用乐器" : "只看当前琴") : `浏览全部 (${instruments.length})`;
-  $("pianoteqInstrumentSearch").hidden=!pianoteqState.showAll;
-  $("pianoteqInstrumentSummary").textContent=owned.length || free.length ? `${owned.length} 台我的琴 · ${free.length} 台免费` : `当前琴 · 另有 ${Math.max(0,instruments.length-1)} 台可浏览`;
-  $("pianoteqInstrumentList").innerHTML=visible.map(instrument=>`<button type="button" class="${instrument.name===pianoteqState.selectedInstrument?"active":""}" data-pianoteq-instrument="${encodeURIComponent(instrument.name)}">${escapeHtml(instrument.name)}<small>${instrument.count} 个 preset${instrument.free?" · 免费":""}${instrument.name===pianoteqState.currentInstrument?" · 当前":""}</small></button>`).join("");
+  $("pianoteqShowAll").hidden=!demos.length;
+  $("pianoteqShowAll").textContent=pianoteqState.showAll ? "隐藏 Demo" : `包含 Demo (${demos.length})`;
+  $("pianoteqInstrumentSearch").hidden=instruments.length<8;
+  $("pianoteqInstrumentSummary").textContent=hasAvailable ? `${purchased.length} 台已购买 · ${free.length} 台免费` : `当前琴 · 另有 ${Math.max(0,instruments.length-1)} 台 Demo`;
+  const sections=[
+    {access:"purchased",label:"已购买",items:visible.filter(instrument=>instrument.access==="purchased")},
+    {access:"free",label:"免费乐器",items:visible.filter(instrument=>instrument.access==="free")},
+    {access:"demo",label:"Demo",items:visible.filter(instrument=>instrument.access==="demo")},
+  ];
+  $("pianoteqInstrumentList").innerHTML=sections.filter(section=>section.items.length).map(section=>
+    `<div class="pianoteq-instrument-group ${section.access}"><strong>${section.label}</strong><span>${section.items.length}</span></div>${section.items.map(instrument=>`<button type="button" class="${instrument.name===pianoteqState.selectedInstrument?"active":""}" data-pianoteq-instrument="${encodeURIComponent(instrument.name)}"><strong>${escapeHtml(instrument.name)}</strong><small>${escapeHtml(instrument.collection)} · ${instrument.count} 个 preset${instrument.name===pianoteqState.currentInstrument?" · 当前":""}</small><em class="pianoteq-access ${instrument.access}">${instrument.access==="purchased"?"Purchased":instrument.access==="free"?"Free":"Demo"}</em></button>`).join("")}`
+  ).join("");
 }
 function renderPianoteqList(){
   const favorites=pianoteqState.favorites;

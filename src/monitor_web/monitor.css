@@ -53,9 +53,18 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-reverb-load.active { border-color:var(--accent); background:var(--soft); color:var(--accent); }
 .pianoteq-instrument-search { width:100%; height:42px; margin-bottom:8px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 11px; font:inherit; font-size:14px; }
 .pianoteq-instrument-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:7px; }
-.pianoteq-instrument-list button { min-height:52px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:8px 10px; font:inherit; font-size:13px; font-weight:850; line-height:1.2; text-align:left; cursor:pointer; }
+.pianoteq-instrument-list button { position:relative; min-height:58px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:9px 72px 9px 10px; font:inherit; font-size:13px; line-height:1.2; text-align:left; cursor:pointer; }
 .pianoteq-instrument-list button.active { border-color:var(--accent); background:var(--soft); color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
+.pianoteq-instrument-list button > strong { display:block; font-size:13px; font-weight:850; }
 .pianoteq-instrument-list button small { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+.pianoteq-instrument-group { grid-column:1/-1; display:flex; align-items:center; gap:7px; margin-top:5px; padding-top:8px; border-top:1px solid var(--line); color:var(--muted); font-size:11px; }
+.pianoteq-instrument-group:first-child { margin-top:0; padding-top:0; border-top:0; }
+.pianoteq-instrument-group strong { color:var(--ink); font-size:12px; }
+.pianoteq-instrument-group span { min-width:21px; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--muted); text-align:center; font-weight:850; }
+.pianoteq-access { position:absolute; top:9px; right:8px; border-radius:999px; padding:3px 6px; font-size:9px; font-style:normal; font-weight:900; letter-spacing:.02em; }
+.pianoteq-access.purchased { background:var(--accent); color:#fff; }
+.pianoteq-access.free { background:#fff0c7; color:#8a5700; }
+.pianoteq-access.demo { background:#edf0ed; color:#7b847f; }
 .pianoteq-search { display:grid; gap:5px; margin-top:16px; color:var(--muted); font-size:11px; font-weight:850; }
 .pianoteq-search input { width:100%; height:44px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 12px; font:inherit; font-size:15px; }
 .pianoteq-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:52vh; margin-top:10px; overflow:auto; }
@@ -249,7 +258,7 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .pianoteq-control { display:grid; grid-template-columns:minmax(72px,.65fr) 1.35fr; align-items:center; gap:8px; }
   .pianoteq-control > span { margin:0; }
   .pianoteq-save-body form { grid-template-columns:1fr; }
-  .pianoteq-instrument-list { grid-template-columns:1fr 1fr; }
+  .pianoteq-instrument-list { grid-template-columns:1fr; }
   header { display:none; }
   h1 { font-size:22px; }
   h2 { font-size:15px; }

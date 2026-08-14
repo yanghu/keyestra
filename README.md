@@ -158,10 +158,11 @@ Pianoteq's RPC server stays private to the PC; only the existing Keyestra
 Monitor port is exposed to the local network. Use `keyestra-monitor
 --pianoteq-rpc <host:port>` only if Pianoteq uses a different local address.
 
-Free KIViR and Bells/Carillons instruments are shown with a **Free** badge once
-they have been downloaded from the Modartt user area and installed in
-Pianoteq. They are grouped with usable instruments rather than unlicensed demo
-models.
+Installed instruments reported as usable by Pianoteq are grouped as
+**Purchased** or **Free** from Pianoteq's license metadata. Their collection
+(for example Acoustic Piano, Historical Piano, or Piano Predecessor) is shown
+on each card. Unlicensed instruments remain in a separate **Demo** group that
+can be included on demand.
 
 ### Compare pianos hosted in REAPER
 
