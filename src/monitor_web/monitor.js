@@ -37,6 +37,46 @@ const workingRanges = [
 ];
 const $ = (id) => document.getElementById(id);
 let pianoteqState = { available: false, presets: [], reverbPresets: [], favorites: [], reverbFavorites: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, currentPresetName: null, currentPresetBank: null, currentReverbPreset: null, showAll: false };
+let soundModeState = { mode:"unknown", pianoOutput:"Clavinova", localControl:null, pianoteqMuted:null, pianoteqAvailable:false, busy:false };
+function renderSoundMode(data={}){
+  soundModeState={...soundModeState,...data};
+  document.querySelectorAll("[data-sound-mode]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.soundMode===soundModeState.mode);
+    button.disabled=soundModeState.busy;
+  });
+  const status=$('soundModeStatus');
+  status.classList.remove("error");
+  if(soundModeState.busy) status.textContent="正在切换声音来源…";
+  else if(soundModeState.mode==="local") status.textContent=`${soundModeState.pianoOutput} Local Control 开 · Pianoteq 静音`;
+  else if(soundModeState.mode==="pianoteq") status.textContent=`${soundModeState.pianoOutput} Local Control 关 · Pianoteq 发声`;
+  else status.textContent="尚未同步；请选择琴体或 Pianoteq";
+}
+async function fetchSoundMode(){
+  try{
+    const response=await fetch("/sound-mode",{cache:"no-store"});
+    if(!response.ok) throw new Error("声音路由状态不可用");
+    renderSoundMode(await response.json());
+  }catch(error){
+    renderSoundMode();
+    $("soundModeStatus").textContent=error.message || "声音路由状态不可用";
+    $("soundModeStatus").classList.add("error");
+  }
+}
+async function setSoundMode(mode){
+  if(soundModeState.busy || !["local","pianoteq"].includes(mode)) return;
+  soundModeState.busy=true; renderSoundMode();
+  try{
+    const response=await fetch(`/sound-mode?${new URLSearchParams({mode})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "声音来源切换失败");
+    soundModeState.busy=false; renderSoundMode(data);
+  }catch(error){
+    soundModeState.busy=false;
+    await fetchSoundMode();
+    $("soundModeStatus").textContent=error.message || "声音来源切换失败";
+    $("soundModeStatus").classList.add("error");
+  }
+}
 function presetKey(preset){ return `${preset.bank || ""}\u0000${preset.name}`; }
 function compactPianoteqPresetName(preset){
   const names=pianoteqState.presets.filter(candidate=>candidate.instrument===preset.instrument).map(candidate=>candidate.name.split(" "));
@@ -247,6 +287,7 @@ function renderPianoteqList(){
 }
 async function fetchPianoteq(){
   $("pianoteqRefresh").disabled=true;
+  fetchSoundMode();
   try{
     const [response,favoritesResponse]=await Promise.all([
       fetch("/pianoteq",{cache:"no-store"}),
@@ -370,6 +411,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button=>button.addEventListe
   if(piano) fetchPianoteq();
 }));
 $("pianoteqRefresh").addEventListener("click",fetchPianoteq);
+document.querySelectorAll("[data-sound-mode]").forEach(button=>button.addEventListener("click",()=>setSoundMode(button.dataset.soundMode)));
 $("pianoteqSearch").addEventListener("input",renderPianoteqList);
 $("pianoteqInstrumentSearch").addEventListener("input",()=>{ renderPianoteqInstruments(); renderPianoteqList(); });
 $("pianoteqShowAll").addEventListener("click",()=>{
@@ -1773,6 +1815,62 @@ restoreSettings();
 $("keySelect").addEventListener("change",()=>{ updateSettings({key:$("keySelect").value}); if(state.latestData) render(state.latestData); });
 let pollingTimer = null;
 let eventSource = null;
+let wakeLockSentinel = null;
+let wakeLockRequesting = false;
+let wakeLockError = null;
+let wakeLockDesired = true;
+try { wakeLockDesired=localStorage.getItem("keyestra-wake-lock")!=="off"; } catch(error) {}
+function wakeLockSupported(){ return "wakeLock" in navigator && typeof navigator.wakeLock.request==="function"; }
+function wakeLockActive(){ return Boolean(wakeLockSentinel && !wakeLockSentinel.released); }
+function renderWakeLock(){
+  const supported=wakeLockSupported();
+  const active=wakeLockActive();
+  const button=$("wakeLockToggle");
+  button.classList.toggle("active",active);
+  button.classList.toggle("requested",wakeLockDesired && !active);
+  button.classList.toggle("unsupported",!supported);
+  button.setAttribute("aria-pressed",String(wakeLockDesired));
+  $("wakeLockLabel").textContent=active ? "常亮中" : wakeLockDesired ? "常亮" : "常亮关";
+  $("wakeLockStatus").textContent=active ? "屏幕保持" : !supported ? "系统设置" : wakeLockRequesting ? "正在启用" : wakeLockError ? "点此重试" : wakeLockDesired ? "等待启用" : "已关闭";
+  button.title=!supported ? "当前连接不支持 Screen Wake Lock；点此查看 iPhone 设置方法" : wakeLockError ? wakeLockError : "保持此页面显示时屏幕不自动锁定";
+}
+async function requestWakeLock(){
+  if(!wakeLockDesired || !wakeLockSupported() || document.visibilityState!=="visible" || wakeLockActive() || wakeLockRequesting){ renderWakeLock(); return; }
+  wakeLockRequesting=true; wakeLockError=null; renderWakeLock();
+  try{
+    const sentinel=await navigator.wakeLock.request("screen");
+    wakeLockSentinel=sentinel;
+    sentinel.addEventListener("release",()=>{
+      if(wakeLockSentinel===sentinel) wakeLockSentinel=null;
+      renderWakeLock();
+    });
+  }catch(error){ wakeLockError=error?.message || "iPhone 拒绝了屏幕常亮请求"; }
+  finally{ wakeLockRequesting=false; renderWakeLock(); }
+}
+async function releaseWakeLock(){
+  const sentinel=wakeLockSentinel;
+  wakeLockSentinel=null;
+  if(sentinel && !sentinel.released){ try{ await sentinel.release(); }catch(error){} }
+  renderWakeLock();
+}
+$("wakeLockToggle").addEventListener("click",async()=>{
+  if(!wakeLockSupported()){
+    window.alert("当前局域网 HTTP 页面不支持网页常亮。请在 iPhone 的“设置 → 显示与亮度 → 自动锁定”中选择“永不”，或以后通过 HTTPS 打开 Keyestra。");
+    return;
+  }
+  if(wakeLockActive()){
+    wakeLockDesired=false;
+    try{ localStorage.setItem("keyestra-wake-lock","off"); }catch(error){}
+    await releaseWakeLock();
+  }else{
+    wakeLockDesired=true;
+    try{ localStorage.setItem("keyestra-wake-lock","on"); }catch(error){}
+    await requestWakeLock();
+  }
+});
+document.addEventListener("pointerdown",event=>{
+  if(!event.target.closest("#wakeLockToggle")) requestWakeLock();
+},{passive:true});
 const initialKeyestraBuild=document.body.dataset.keyestraBuild || null;
 let announcedKeyestraBuild=null;
 let serviceWorkerHadController="serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
@@ -1817,9 +1915,12 @@ if("serviceWorker" in navigator && window.isSecureContext){
     .catch(()=>{});
 }
 document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState==="visible") checkKeyestraUpdate();
+  if(document.visibilityState==="visible"){
+    checkKeyestraUpdate();
+    requestWakeLock();
+  }
 });
-window.addEventListener("pageshow",checkKeyestraUpdate);
+window.addEventListener("pageshow",()=>{ checkKeyestraUpdate(); requestWakeLock(); });
 window.setInterval(checkKeyestraUpdate,30000);
 function startPolling(){ if(pollingTimer) return; pollingTimer=setInterval(fetchState,220); fetchState(); }
 function connectEvents(){
@@ -1829,4 +1930,6 @@ function connectEvents(){
   eventSource.onerror = ()=>{ $("status").textContent="reconnecting"; if(eventSource){ eventSource.close(); eventSource=null; } startPolling(); setTimeout(()=>{ if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; } connectEvents(); },2500); };
 }
 checkKeyestraUpdate();
+renderWakeLock();
+requestWakeLock();
 connectEvents();

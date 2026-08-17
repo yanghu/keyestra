@@ -182,6 +182,25 @@ impl PianoteqClient {
         self.fetch_controls()
     }
 
+    pub fn set_volume_normalized(&self, normalized_value: f64) -> Result<()> {
+        if !normalized_value.is_finite() || !(0.0..=1.0).contains(&normalized_value) {
+            return Err(anyhow!("Pianoteq volume value must be between 0 and 1"));
+        }
+        self.rpc(
+            "setParameters",
+            json!({ "list": [{ "id": "volume", "normalized_value": normalized_value }] }),
+        )?;
+        Ok(())
+    }
+
+    pub fn volume_normalized(&self) -> Result<f64> {
+        self.fetch_controls()?
+            .into_iter()
+            .find(|control| control.id == "volume")
+            .map(|control| control.normalized_value)
+            .ok_or_else(|| anyhow!("Pianoteq did not expose its volume control"))
+    }
+
     fn fetch_snapshot(
         &self,
     ) -> Result<(
@@ -521,6 +540,18 @@ mod tests {
         ]));
         assert_eq!(presets[0].display_name, "Piano room 2");
         assert_eq!(presets[1].display_name, "My Presets / My Hall");
+    }
+
+    #[test]
+    fn controls_do_not_mislabel_the_instrument_mute_parameter_as_output_mute() {
+        let controls = parse_controls(json!([
+            {"id":"mute", "name":"Mute", "normalized_value":1.0, "text":"1", "unit":""},
+            {"id":"volume", "name":"Volume", "normalized_value":0.5, "text":"-10.0", "unit":"dB"},
+            {"id":"unrelated", "name":"Other", "normalized_value":0.5}
+        ]));
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].id, "volume");
+        assert_eq!(controls[0].normalized_value, 0.5);
     }
 
     #[test]

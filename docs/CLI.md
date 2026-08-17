@@ -40,6 +40,7 @@ cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --bypass
 ```powershell
 cargo run --bin keyestra-monitor -- `
   --in "Keyestra MIDI" `
+  --piano-out "Clavinova" `
   --port 8770
 ```
 
@@ -49,6 +50,7 @@ network can connect. To restrict it to the current computer:
 ```powershell
 cargo run --bin keyestra-monitor -- `
   --in "Keyestra MIDI" `
+  --piano-out "Clavinova" `
   --host 127.0.0.1 `
   --port 8770
 ```

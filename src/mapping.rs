@@ -208,20 +208,20 @@ mod tests {
         let table = piecewise_table(Some(&[
             [0, 0],
             [1, 0],
-            [18, 30],
-            [32, 57],
-            [50, 84],
-            [108, 127],
+            [30, 22],
+            [60, 66],
+            [85, 93],
+            [117, 127],
             [127, 127],
         ]))
         .unwrap();
         assert_eq!(table[0], 0);
         assert_eq!(table[1], 0);
-        assert_eq!(table[18], 30);
-        assert_eq!(table[32], 57);
-        assert_eq!(table[50], 84);
-        assert_eq!(table[108], 127);
+        assert_eq!(table[30], 22);
+        assert_eq!(table[60], 66);
+        assert_eq!(table[85], 93);
+        assert_eq!(table[117], 127);
         assert_eq!(table[127], 127);
-        assert_eq!(table[25], 44);
+        assert_eq!(table[45], 44);
     }
 }

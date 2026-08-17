@@ -19,6 +19,7 @@
     <nav class="app-tabs" aria-label="Keyestra 界面">
       <button type="button" class="active" data-app-tab="monitor">Monitor</button>
       <button type="button" data-app-tab="piano">Piano</button>
+      <button type="button" class="wake-lock-toggle" id="wakeLockToggle" aria-pressed="false"><span id="wakeLockLabel">常亮</span><small id="wakeLockStatus">待启用</small></button>
     </nav>
     <section class="pianoteq-view" aria-label="Piano Remote">
       <section class="panel pianoteq-panel">
@@ -29,6 +30,13 @@
           </div>
           <button type="button" class="pianoteq-refresh" id="pianoteqRefresh">刷新</button>
         </div>
+        <section class="sound-source-switch" aria-label="钢琴声音来源">
+          <div role="group" aria-label="声音来源">
+            <button type="button" data-sound-mode="local">Clavinova 琴体</button>
+            <button type="button" data-sound-mode="pianoteq">Pianoteq</button>
+          </div>
+          <small id="soundModeStatus">正在读取声音路由…</small>
+        </section>
         <div class="pianoteq-current">
           <span id="pianoteqCurrentInstrument">当前钢琴</span>
           <strong id="pianoteqCurrent">正在连接…</strong>

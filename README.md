@@ -145,6 +145,12 @@ The phone layout is organized around three jobs:
 - **Capture** — mark a Take, save a recent range, or select and preview an exact
   section before exporting it.
 
+The top-bar **常亮** control requests a Screen Wake Lock and reacquires it when
+the page becomes visible again. Wake Lock requires a secure browser context.
+If an iPhone opens the Monitor over plain LAN HTTP, Keyestra reports that the
+API is unavailable and points to **Settings → Display & Brightness → Auto-Lock
+→ Never** as the fallback.
+
 The separate **Piano** tab can control a local Pianoteq instance. Start
 Pianoteq with its JSON-RPC server bound to localhost:
 
@@ -161,6 +167,17 @@ Dynamics, plus previous/next switching among Favorite reverb presets. Modified
 sounds can overwrite the current user preset or be saved into Pianoteq's `My
 Presets` bank under a new name; Keyestra only manages the Favorite marker, not
 the preset contents.
+
+The two-button sound-source control switches the physical piano and Pianoteq
+as one operation. **Clavinova body** sends MIDI Local Control On (CC 122, value
+127), remembers Pianoteq's master Volume, and sets it to `Off`. **Pianoteq**
+restores that remembered Volume before sending Local Control Off (CC 122, value
+0). Pianoteq's parameter named `mute` is an instrument parameter, not an output
+mute switch, so Keyestra intentionally does not use it for sound routing. The
+order avoids a silent failure if the second half of a switch cannot be
+completed. The Tray passes its physical input name to the Monitor as the
+default piano output; override it with `--piano-out` when the input and output
+port names differ.
 Pianoteq's RPC server stays private to the PC; only the existing Keyestra
 Monitor port is exposed to the local network. Use `keyestra-monitor
 --pianoteq-rpc <host:port>` only if Pianoteq uses a different local address.
@@ -293,10 +310,10 @@ mode = "piecewise"
 points = [
   [0, 0],
   [1, 0],
-  [18, 30],
-  [32, 57],
-  [50, 84],
-  [108, 127],
+  [30, 22],
+  [60, 66],
+  [85, 93],
+  [117, 127],
   [127, 127],
 ]
 ```
@@ -304,6 +321,8 @@ points = [
 Each point is `[input_velocity, output_velocity]`. Keyestra interpolates the
 points into its velocity lookup table at startup. Velocity `0` is always kept
 at `0`, because Note On with velocity `0` is commonly used as Note Off.
+Only Note On messages with a nonzero velocity use this curve; Note Off, CC,
+pedal, pitch bend, realtime, and other MIDI messages pass through unchanged.
 
 [`examples/curve-mid-control.toml`](examples/curve-mid-control.toml) keeps more
 finger-control room in the middle velocities. The Tray can switch between both

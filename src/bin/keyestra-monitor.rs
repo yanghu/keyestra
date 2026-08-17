@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use midir::{Ignore, MidiInput, MidiInputPort};
+use midir::{Ignore, MidiInput, MidiInputPort, MidiOutput};
 
 #[path = "../cfx_render.rs"]
 mod cfx_render;
@@ -74,6 +74,13 @@ struct Cli {
     pianoteq_rpc: String,
 
     #[arg(
+        long = "piano-out",
+        default_value = "Clavinova",
+        help = "Physical piano MIDI output used for Local Control"
+    )]
+    piano_output: String,
+
+    #[arg(
         long,
         help = "REAPER Piano Compare TOML config (defaults to %APPDATA%\\keyestra\\reaper-pianos.toml)"
     )]
@@ -102,6 +109,158 @@ struct Cli {
 enum PortSelector {
     Index(usize),
     Name(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PianoSoundMode {
+    Local,
+    Pianoteq,
+}
+
+impl PianoSoundMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Pianoteq => "pianoteq",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SoundSwitchStep {
+    LocalControl(bool),
+    PianoteqOutput(bool),
+}
+
+#[derive(Debug, Default)]
+struct PianoSoundState {
+    mode: Option<PianoSoundMode>,
+    local_control: Option<bool>,
+    pianoteq_volume_before_silence: Option<f64>,
+}
+
+struct PianoSoundControl {
+    output_name: String,
+    state: Mutex<PianoSoundState>,
+}
+
+impl PianoSoundControl {
+    fn new(output_name: String) -> Self {
+        Self {
+            output_name,
+            state: Mutex::new(PianoSoundState::default()),
+        }
+    }
+
+    fn snapshot(&self, pianoteq: &PianoteqClient) -> serde_json::Value {
+        let pianoteq_volume = pianoteq.volume_normalized().ok();
+        let (mode, local_control) = self
+            .state
+            .lock()
+            .map(|mut state| {
+                if let Some(volume) = pianoteq_volume.filter(|volume| *volume > 0.0) {
+                    state.pianoteq_volume_before_silence = Some(volume);
+                }
+                (state.mode.map(PianoSoundMode::as_str), state.local_control)
+            })
+            .unwrap_or((None, None));
+        let pianoteq_muted = pianoteq_volume.map(|volume| volume == 0.0);
+        serde_json::json!({
+            "mode": mode.unwrap_or("unknown"),
+            "pianoOutput": self.output_name,
+            "localControl": local_control,
+            "pianoteqMuted": pianoteq_muted,
+            "pianoteqAvailable": pianoteq_muted.is_some(),
+        })
+    }
+
+    fn set_mode(
+        &self,
+        mode: PianoSoundMode,
+        pianoteq: &PianoteqClient,
+    ) -> Result<serde_json::Value> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Piano sound state lock poisoned"))?;
+        for step in sound_switch_steps(mode) {
+            match step {
+                SoundSwitchStep::LocalControl(enabled) => {
+                    send_local_control(&self.output_name, enabled)?;
+                    state.local_control = Some(enabled);
+                }
+                SoundSwitchStep::PianoteqOutput(enabled) => {
+                    if enabled {
+                        let restore_volume = state
+                            .pianoteq_volume_before_silence
+                            .filter(|volume| *volume > 0.0)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "Pianoteq volume was already Off and no previous level is known"
+                                )
+                            })?;
+                        pianoteq.set_volume_normalized(restore_volume)?;
+                    } else {
+                        let current_volume = pianoteq.volume_normalized()?;
+                        if current_volume > 0.0 {
+                            state.pianoteq_volume_before_silence = Some(current_volume);
+                        }
+                        pianoteq.set_volume_normalized(0.0)?;
+                    }
+                }
+            }
+        }
+        state.mode = Some(mode);
+        drop(state);
+        Ok(self.snapshot(pianoteq))
+    }
+}
+
+fn sound_switch_steps(mode: PianoSoundMode) -> [SoundSwitchStep; 2] {
+    match mode {
+        PianoSoundMode::Local => [
+            SoundSwitchStep::LocalControl(true),
+            SoundSwitchStep::PianoteqOutput(false),
+        ],
+        PianoSoundMode::Pianoteq => [
+            SoundSwitchStep::PianoteqOutput(true),
+            SoundSwitchStep::LocalControl(false),
+        ],
+    }
+}
+
+fn local_control_message(enabled: bool) -> [u8; 3] {
+    [0xB0, 122, if enabled { 127 } else { 0 }]
+}
+
+fn send_local_control(output_selector: &str, enabled: bool) -> Result<()> {
+    let midi_output = MidiOutput::new("keyestra-local-control")?;
+    let ports = midi_output.ports();
+    let wanted = output_selector.to_lowercase();
+    let port = ports
+        .iter()
+        .find(|port| {
+            midi_output
+                .port_name(port)
+                .is_ok_and(|name| name.eq_ignore_ascii_case(output_selector))
+        })
+        .or_else(|| {
+            ports.iter().find(|port| {
+                midi_output
+                    .port_name(port)
+                    .is_ok_and(|name| name.to_lowercase().contains(&wanted))
+            })
+        })
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("MIDI output '{}' was not found", output_selector))?;
+    let port_name = midi_output.port_name(&port)?;
+    let mut connection = midi_output
+        .connect(&port, "keyestra-local-control")
+        .with_context(|| format!("Failed to open MIDI output {}", port_name))?;
+    connection
+        .send(&local_control_message(enabled))
+        .with_context(|| format!("Failed to set Local Control on {}", port_name))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +457,7 @@ fn main() -> Result<()> {
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
     let pianoteq = Arc::new(PianoteqClient::new(cli.pianoteq_rpc));
+    let piano_sound = Arc::new(PianoSoundControl::new(cli.piano_output));
     let pianoteq_favorites = Arc::new(PianoteqFavoriteStore::discover()?);
     let reaper = Arc::new(ReaperClient::discover(cli.reaper_config));
     let midi_state = Arc::clone(&state);
@@ -343,6 +503,7 @@ fn main() -> Result<()> {
                 let cfx_renderer = Arc::clone(&cfx_renderer);
                 let recorder_control = Arc::clone(&recorder_control);
                 let pianoteq = Arc::clone(&pianoteq);
+                let piano_sound = Arc::clone(&piano_sound);
                 let pianoteq_favorites = Arc::clone(&pianoteq_favorites);
                 let reaper = Arc::clone(&reaper);
                 thread::spawn(move || {
@@ -356,6 +517,7 @@ fn main() -> Result<()> {
                         cfx_renderer,
                         recorder_control,
                         pianoteq,
+                        piano_sound,
                         pianoteq_favorites,
                         reaper,
                     ) {
@@ -445,6 +607,7 @@ fn handle_client(
     cfx_renderer: Arc<CfxRenderer>,
     recorder_control: Arc<Mutex<()>>,
     pianoteq: Arc<PianoteqClient>,
+    piano_sound: Arc<PianoSoundControl>,
     pianoteq_favorites: Arc<PianoteqFavoriteStore>,
     reaper: Arc<ReaperClient>,
 ) -> Result<()> {
@@ -620,6 +783,37 @@ fn handle_client(
                 let result = favorite
                     .and_then(|favorite| pianoteq_favorites.set(&kind, &key, favorite))
                     .and_then(|favorites| serde_json::to_value(favorites).map_err(Into::into));
+                result_json_response(&mut stream, result)
+            }
+        }
+        "/sound-mode" => {
+            if method == "GET" {
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &piano_sound.snapshot(&pianoteq).to_string(),
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "Sound mode control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let result = match query_value(query, "mode").as_deref() {
+                    Some("local") => piano_sound.set_mode(PianoSoundMode::Local, &pianoteq),
+                    Some("pianoteq") => piano_sound.set_mode(PianoSoundMode::Pianoteq, &pianoteq),
+                    _ => Err(anyhow::anyhow!("mode must be local or pianoteq")),
+                };
                 result_json_response(&mut stream, result)
             }
         }
@@ -1804,10 +1998,15 @@ mod tests {
         assert!(html.contains("id=\"pianoteqCurrentBank\""));
         assert!(html.contains("id=\"pianoteqCurrentReverbName\""));
         assert!(html.contains("id=\"pianoteqReverbQuickHint\""));
+        assert!(html.contains("data-sound-mode=\"local\""));
+        assert!(html.contains("data-sound-mode=\"pianoteq\""));
+        assert!(html.contains("id=\"wakeLockToggle\""));
         assert!(!html.contains("data-pianoteq-view"));
         assert!(!html.contains("id=\"pianoteqAllPresets\""));
         assert!(MONITOR_JS.contains("pianoteq-favorite-source"));
         assert!(MONITOR_JS.contains("replace(/^My\\s+/i"));
+        assert!(MONITOR_JS.contains("navigator.wakeLock.request(\"screen\")"));
+        assert!(MONITOR_JS.contains("fetch(`/sound-mode?"));
     }
 
     #[test]
@@ -1837,6 +2036,30 @@ mod tests {
             vec![DEFAULT_MIDI_PORT, LEGACY_MIDI_PORT]
         );
         assert_eq!(input_name_candidates("Custom Port"), vec!["Custom Port"]);
+    }
+
+    #[test]
+    fn clavinova_local_control_uses_the_documented_channel_mode_message() {
+        assert_eq!(local_control_message(false), [0xB0, 0x7A, 0x00]);
+        assert_eq!(local_control_message(true), [0xB0, 0x7A, 0x7F]);
+    }
+
+    #[test]
+    fn sound_switch_order_prefers_a_brief_overlap_over_silence() {
+        assert_eq!(
+            sound_switch_steps(PianoSoundMode::Local),
+            [
+                SoundSwitchStep::LocalControl(true),
+                SoundSwitchStep::PianoteqOutput(false),
+            ]
+        );
+        assert_eq!(
+            sound_switch_steps(PianoSoundMode::Pianoteq),
+            [
+                SoundSwitchStep::PianoteqOutput(true),
+                SoundSwitchStep::LocalControl(false),
+            ]
+        );
     }
 
     #[test]

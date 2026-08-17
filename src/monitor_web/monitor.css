@@ -2,9 +2,13 @@
 * { box-sizing:border-box; }
 body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 main { width:min(1280px, calc(100vw - 32px)); margin:0 auto; padding:24px 0 32px; }
-.app-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; width:min(360px,100%); margin:0 auto 16px; padding:4px; border:1px solid var(--line); border-radius:10px; background:#eef2ee; }
+.app-tabs { display:grid; grid-template-columns:1fr 1fr minmax(82px,.8fr); gap:4px; width:min(480px,100%); margin:0 auto 16px; padding:4px; border:1px solid var(--line); border-radius:10px; background:#eef2ee; }
 .app-tabs button { min-height:38px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
 .app-tabs button.active { background:#fff; color:var(--accent); box-shadow:0 1px 5px rgba(24,32,29,.1); }
+.app-tabs .wake-lock-toggle { display:grid; place-content:center; gap:1px; padding:3px 7px; }
+.app-tabs .wake-lock-toggle small { font-size:9px; font-weight:750; }
+.app-tabs .wake-lock-toggle.requested { color:var(--accent); }
+.app-tabs .wake-lock-toggle.unsupported { color:var(--red); }
 .update-banner { position:sticky; top:8px; z-index:40; display:flex; align-items:center; justify-content:space-between; gap:12px; width:min(720px,100%); margin:0 auto 12px; border:1px solid #d59b2c; border-radius:10px; background:#fff6dc; padding:10px 12px; color:#654100; box-shadow:0 4px 16px rgba(101,65,0,.14); }
 .update-banner[hidden] { display:none; }
 .update-banner span { min-width:0; }
@@ -19,6 +23,13 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-heading h2 { margin-top:3px; font-size:24px; }
 .pianoteq-eyebrow { color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.14em; }
 .pianoteq-refresh { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 12px; font:inherit; font-weight:850; cursor:pointer; }
+.sound-source-switch { margin-top:12px; padding:10px; border:1px solid var(--line); border-radius:10px; background:#fbfcfa; }
+.sound-source-switch > div { display:grid; grid-template-columns:1fr 1fr; gap:5px; padding:4px; border-radius:9px; background:#e8eeea; }
+.sound-source-switch button { min-height:48px; border:0; border-radius:7px; background:transparent; color:var(--muted); padding:6px 10px; font:inherit; font-size:13px; font-weight:900; cursor:pointer; }
+.sound-source-switch button.active { background:#fff; color:var(--accent); box-shadow:0 1px 5px rgba(24,32,29,.12); }
+.sound-source-switch button:disabled { opacity:.5; cursor:wait; }
+.sound-source-switch > small { display:block; min-height:15px; margin-top:7px; color:var(--muted); font-size:11px; font-weight:700; text-align:center; }
+.sound-source-switch > small.error { color:var(--red); }
 .pianoteq-current { display:grid; gap:3px; margin-top:12px; padding:13px 14px; border-radius:10px; background:var(--accent); color:#fff; }
 .pianoteq-current span,.pianoteq-current small { color:rgba(255,255,255,.76); font-size:12px; font-weight:700; }
 .pianoteq-current strong { font-size:clamp(19px,4.2vw,28px); line-height:1.16; }

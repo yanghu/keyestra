@@ -44,6 +44,12 @@ struct Cli {
     #[arg(long = "monitor-in", default_value = "Keyestra MIDI")]
     monitor_input: String,
 
+    #[arg(
+        long = "piano-out",
+        help = "Physical piano MIDI output for Local Control (defaults to --in)"
+    )]
+    piano_output: Option<String>,
+
     #[arg(long = "monitor-port", default_value_t = 8770)]
     monitor_port: u16,
 
@@ -71,6 +77,7 @@ struct MapperProcess {
 struct MonitorProcess {
     child: Option<Child>,
     input: String,
+    piano_output: String,
     host: String,
     port: u16,
     log_path: PathBuf,
@@ -212,10 +219,17 @@ impl MapperProcess {
 }
 
 impl MonitorProcess {
-    fn new(input: String, host: String, port: u16, log_path: PathBuf) -> Self {
+    fn new(
+        input: String,
+        piano_output: String,
+        host: String,
+        port: u16,
+        log_path: PathBuf,
+    ) -> Self {
         Self {
             child: None,
             input,
+            piano_output,
             host,
             port,
             log_path,
@@ -235,6 +249,8 @@ impl MonitorProcess {
         command
             .arg("--in")
             .arg(&self.input)
+            .arg("--piano-out")
+            .arg(&self.piano_output)
             .arg("--host")
             .arg(&self.host)
             .arg("--port")
@@ -690,9 +706,11 @@ fn main() -> Result<()> {
                 .map(resolve_tray_curve)
         })
         .unwrap_or_else(default_curve_path);
+    let piano_output = cli.piano_output.unwrap_or_else(|| cli.input.clone());
     let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log);
     let monitor = MonitorProcess::new(
         cli.monitor_input,
+        piano_output,
         cli.monitor_host,
         cli.monitor_port,
         monitor_log_path,
@@ -1112,7 +1130,7 @@ mod tests {
         ];
 
         assert!(selector_available("0", &names));
-        assert!(selector_available("roland DIGITAL", &names));
+        assert!(selector_available("claviNOVA", &names));
         assert!(!selector_available("2", &names));
         assert!(!selector_available("missing", &names));
     }
