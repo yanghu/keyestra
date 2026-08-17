@@ -4,6 +4,15 @@ Keyestra can use REAPER as an invisible host for several ready-to-play piano
 instruments. The phone talks only to Keyestra; Keyestra talks to REAPER's
 built-in web interface over the piano PC's loopback connection.
 
+For daily playing, keep the four-track Compare project as a reference and save
+a separate `Keyestra Piano Live.rpp`. Running the registered Keyestra bootstrap
+while that Live project is open invokes
+[`keyestra-piano-live-simplify.lua`](../scripts/reaper/keyestra-piano-live-simplify.lua):
+it keeps `Garritan CFX`, renames the SK-EX instance to `Pianoteq Live`, removes
+the other Pianoteq comparison tracks, and saves the result. The Live config then
+uses that single Pianoteq instance for instrument host presets and independent
+reverb scenes.
+
 ## Recommended two-stage setup
 
 The repeatable host setup is automated with
@@ -70,6 +79,12 @@ Enable the mapped `Keyestra MIDI` input on all of these tracks and disable the
 keyboard's raw MIDI input there. Keep the tracks armed/monitored so switching
 does not load a plugin or preset. Keyestra switches only the configured track
 mute states; unrelated project tracks are not changed.
+
+In **Preferences > Audio > MIDI Devices**, keep `Keyestra MIDI` enabled as an
+input and disable the physical piano input (for example `Clavinova-1`). Some
+Windows/Yamaha MIDI drivers reserve the paired output while REAPER holds the
+physical input open; Keyestra needs that output briefly to send Local Control
+CC 122 when switching between the piano body and REAPER VSTs.
 
 The bootstrap supplies these four tracks automatically. If you extend or build
 the project manually, follow the same rules. Before saving, leave exactly one
@@ -180,7 +195,66 @@ tracks = ["CFX Player Close", "CFX Player Room"]
 
 All listed tracks activate together. A REAPER track cannot belong to two
 logical pianos. Piano IDs must be unique and should remain stable because the
-phone remembers the A/B pair by ID.
+phone and saved configuration refer to them by ID.
+
+## Control a Pianoteq VST from the phone (prototype)
+
+REAPER must remain the only application that opens the ASIO driver. Keyestra
+uses REAPER's native OSC input for Pianoteq plug-in parameters; it does not
+start Pianoteq standalone and does not require Pianoteq's JSON-RPC server.
+
+Copy [`scripts/reaper/Keyestra.ReaperOSC`](../scripts/reaper/Keyestra.ReaperOSC)
+to:
+
+```text
+%APPDATA%\REAPER\OSC\Keyestra.ReaperOSC
+```
+
+Then open **Options > Preferences > Control/OSC/web**, add an **OSC (Open Sound
+Control)** surface, and set:
+
+- mode/config: `Keyestra`;
+- device IP: `127.0.0.1`;
+- device port: `9001` (Keyestra briefly listens here after a preset change);
+- local listen port: `9000`;
+- local IP: `127.0.0.1`.
+
+Add a `[pianoteq_vst]` section to `reaper-pianos.toml`. `fx` is one-based and
+normally `1` when Pianoteq is the first plug-in on the track:
+
+```toml
+[pianoteq_vst]
+piano_id = "sk-ex"
+track = "Pianoteq SK-EX"
+fx = 1
+osc_address = "127.0.0.1:9000"
+# Optional; this is the default and must match the OSC surface's device port.
+osc_feedback_address = "127.0.0.1:9001"
+```
+
+The phone exposes Dynamics, Reverb on/off, Reverb Duration, Reverb Mix, and
+Room Dimensions. It sends absolute normalized values when a slider is released.
+After a named instrument preset is selected, Keyestra briefly listens for OSC
+feedback and asks REAPER for the two parameter banks containing these controls.
+The sliders are updated only when a complete fresh snapshot arrives; Keyestra
+does not continuously poll plug-in parameters.
+
+### Add named sound slots
+
+Choose a complete sound inside the Pianoteq plug-in, then use the preset menu
+in REAPER's FX header to save it under a unique name. Add the same host preset
+to the config:
+
+```toml
+[[pianoteq_vst.preset]]
+id = "sk-ex-player"
+name = "SK-EX Player"
+reaper_preset = "SK-EX Player"
+```
+
+Repeat this for the ten or twenty sounds worth keeping on the phone. A sound
+slot stores the complete host-visible plug-in state; the quick controls can
+then make temporary Dynamics and room adjustments on top.
 
 For an alternate config location, start the monitor with:
 

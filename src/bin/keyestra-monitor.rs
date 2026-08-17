@@ -114,14 +114,14 @@ enum PortSelector {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PianoSoundMode {
     Local,
-    Pianoteq,
+    Vst,
 }
 
 impl PianoSoundMode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Local => "local",
-            Self::Pianoteq => "pianoteq",
+            Self::Vst => "vst",
         }
     }
 }
@@ -129,14 +129,13 @@ impl PianoSoundMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SoundSwitchStep {
     LocalControl(bool),
-    PianoteqOutput(bool),
+    ReaperMasterMuted(bool),
 }
 
 #[derive(Debug, Default)]
 struct PianoSoundState {
     mode: Option<PianoSoundMode>,
     local_control: Option<bool>,
-    pianoteq_volume_before_silence: Option<f64>,
 }
 
 struct PianoSoundControl {
@@ -152,33 +151,33 @@ impl PianoSoundControl {
         }
     }
 
-    fn snapshot(&self, pianoteq: &PianoteqClient) -> serde_json::Value {
-        let pianoteq_volume = pianoteq.volume_normalized().ok();
-        let (mode, local_control) = self
+    fn snapshot(&self, reaper: &ReaperClient) -> serde_json::Value {
+        let master_muted = reaper.master_muted().ok();
+        let (remembered_mode, local_control) = self
             .state
             .lock()
-            .map(|mut state| {
-                if let Some(volume) = pianoteq_volume.filter(|volume| *volume > 0.0) {
-                    state.pianoteq_volume_before_silence = Some(volume);
-                }
-                (state.mode.map(PianoSoundMode::as_str), state.local_control)
-            })
+            .map(|state| (state.mode, state.local_control))
             .unwrap_or((None, None));
-        let pianoteq_muted = pianoteq_volume.map(|volume| volume == 0.0);
+        let mode = master_muted
+            .map(|muted| {
+                if muted {
+                    PianoSoundMode::Local
+                } else {
+                    PianoSoundMode::Vst
+                }
+            })
+            .or(remembered_mode)
+            .map(PianoSoundMode::as_str);
         serde_json::json!({
             "mode": mode.unwrap_or("unknown"),
             "pianoOutput": self.output_name,
             "localControl": local_control,
-            "pianoteqMuted": pianoteq_muted,
-            "pianoteqAvailable": pianoteq_muted.is_some(),
+            "reaperMasterMuted": master_muted,
+            "reaperAvailable": master_muted.is_some(),
         })
     }
 
-    fn set_mode(
-        &self,
-        mode: PianoSoundMode,
-        pianoteq: &PianoteqClient,
-    ) -> Result<serde_json::Value> {
+    fn set_mode(&self, mode: PianoSoundMode, reaper: &ReaperClient) -> Result<serde_json::Value> {
         let mut state = self
             .state
             .lock()
@@ -189,30 +188,14 @@ impl PianoSoundControl {
                     send_local_control(&self.output_name, enabled)?;
                     state.local_control = Some(enabled);
                 }
-                SoundSwitchStep::PianoteqOutput(enabled) => {
-                    if enabled {
-                        let restore_volume = state
-                            .pianoteq_volume_before_silence
-                            .filter(|volume| *volume > 0.0)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "Pianoteq volume was already Off and no previous level is known"
-                                )
-                            })?;
-                        pianoteq.set_volume_normalized(restore_volume)?;
-                    } else {
-                        let current_volume = pianoteq.volume_normalized()?;
-                        if current_volume > 0.0 {
-                            state.pianoteq_volume_before_silence = Some(current_volume);
-                        }
-                        pianoteq.set_volume_normalized(0.0)?;
-                    }
+                SoundSwitchStep::ReaperMasterMuted(muted) => {
+                    reaper.set_master_muted(muted)?;
                 }
             }
         }
         state.mode = Some(mode);
         drop(state);
-        Ok(self.snapshot(pianoteq))
+        Ok(self.snapshot(reaper))
     }
 }
 
@@ -220,10 +203,10 @@ fn sound_switch_steps(mode: PianoSoundMode) -> [SoundSwitchStep; 2] {
     match mode {
         PianoSoundMode::Local => [
             SoundSwitchStep::LocalControl(true),
-            SoundSwitchStep::PianoteqOutput(false),
+            SoundSwitchStep::ReaperMasterMuted(true),
         ],
-        PianoSoundMode::Pianoteq => [
-            SoundSwitchStep::PianoteqOutput(true),
+        PianoSoundMode::Vst => [
+            SoundSwitchStep::ReaperMasterMuted(false),
             SoundSwitchStep::LocalControl(false),
         ],
     }
@@ -256,7 +239,11 @@ fn send_local_control(output_selector: &str, enabled: bool) -> Result<()> {
     let port_name = midi_output.port_name(&port)?;
     let mut connection = midi_output
         .connect(&port, "keyestra-local-control")
-        .with_context(|| format!("Failed to open MIDI output {}", port_name))?;
+        .with_context(|| {
+            format!(
+                "Failed to open MIDI output {port_name}. The port may be in use; in REAPER enable Keyestra MIDI and disable the direct {port_name} MIDI input"
+            )
+        })?;
     connection
         .send(&local_control_message(enabled))
         .with_context(|| format!("Failed to set Local Control on {}", port_name))?;
@@ -319,6 +306,15 @@ impl MonitorState {
     }
 
     fn ingest_at(&mut self, now: u128, message: &[u8]) {
+        // Active Sensing is transport keepalive traffic, not a user-visible MIDI
+        // event. Some pianos send it every 200 ms; including it would make every
+        // SSE client redraw the complete monitor while the keyboard is idle.
+        // Still use its timestamp to finish a pending chord on time.
+        if message == [0xFE] {
+            self.flush_ready_chord(now);
+            return;
+        }
+
         self.message_count += 1;
         self.raw.insert(0, raw_event(now, message));
         self.raw.truncate(80);
@@ -792,7 +788,7 @@ fn handle_client(
                     &mut stream,
                     "200 OK",
                     "application/json; charset=utf-8",
-                    &piano_sound.snapshot(&pianoteq).to_string(),
+                    &piano_sound.snapshot(&reaper).to_string(),
                 )
             } else if method != "POST" {
                 respond(
@@ -810,9 +806,11 @@ fn handle_client(
                 )
             } else {
                 let result = match query_value(query, "mode").as_deref() {
-                    Some("local") => piano_sound.set_mode(PianoSoundMode::Local, &pianoteq),
-                    Some("pianoteq") => piano_sound.set_mode(PianoSoundMode::Pianoteq, &pianoteq),
-                    _ => Err(anyhow::anyhow!("mode must be local or pianoteq")),
+                    Some("local") => piano_sound.set_mode(PianoSoundMode::Local, &reaper),
+                    Some("vst") | Some("pianoteq") => {
+                        piano_sound.set_mode(PianoSoundMode::Vst, &reaper)
+                    }
+                    _ => Err(anyhow::anyhow!("mode must be local or vst")),
                 };
                 result_json_response(&mut stream, result)
             }
@@ -844,6 +842,87 @@ fn handle_client(
                 let piano_id = query_value(query, "id").unwrap_or_default();
                 let result = reaper
                     .activate(&piano_id)
+                    .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                result_json_response(&mut stream, result)
+            }
+        }
+        "/reaper-pianoteq" => {
+            if method == "GET" {
+                let body = serde_json::to_string(&reaper.pianoteq_snapshot())?;
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "REAPER Pianoteq control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let result = match query_value(query, "action").as_deref() {
+                    Some("parameter") => {
+                        let parameter = query_value(query, "parameter").unwrap_or_default();
+                        let value = query_value(query, "value")
+                            .and_then(|value| value.parse::<f32>().ok())
+                            .ok_or_else(|| anyhow::anyhow!("Missing or invalid parameter value"));
+                        value.and_then(|value| reaper.set_pianoteq_parameter(&parameter, value))
+                    }
+                    Some("preset") => {
+                        let preset = query_value(query, "id").unwrap_or_default();
+                        reaper.load_pianoteq_preset(&preset)
+                    }
+                    Some("reverb") => {
+                        let reverb_id = query_value(query, "id").unwrap_or_default();
+                        reaper.load_pianoteq_reverb(&reverb_id)
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "action must be parameter, preset, or reverb"
+                    )),
+                }
+                .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
+                result_json_response(&mut stream, result)
+            }
+        }
+        "/reaper-cfx" => {
+            if method == "GET" {
+                let body = serde_json::to_string(&reaper.cfx_snapshot())?;
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "REAPER CFX control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let result = query_value(query, "masterVolumeCc")
+                    .and_then(|value| value.parse::<u8>().ok())
+                    .filter(|value| *value <= 127)
+                    .ok_or_else(|| anyhow::anyhow!("masterVolumeCc must be between 0 and 127"))
+                    .and_then(|value| reaper.set_cfx_master_volume(value))
                     .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
                 result_json_response(&mut stream, result)
             }
@@ -1999,7 +2078,7 @@ mod tests {
         assert!(html.contains("id=\"pianoteqCurrentReverbName\""));
         assert!(html.contains("id=\"pianoteqReverbQuickHint\""));
         assert!(html.contains("data-sound-mode=\"local\""));
-        assert!(html.contains("data-sound-mode=\"pianoteq\""));
+        assert!(html.contains("data-sound-mode=\"vst\""));
         assert!(html.contains("id=\"wakeLockToggle\""));
         assert!(!html.contains("data-pianoteq-view"));
         assert!(!html.contains("id=\"pianoteqAllPresets\""));
@@ -2045,18 +2124,33 @@ mod tests {
     }
 
     #[test]
+    fn active_sensing_finishes_a_chord_without_dirtying_monitor_state() {
+        let mut state = MonitorState::new("test".to_string());
+        state.ingest_at(1_000, &[0x90, 60, 80]);
+        assert_eq!(state.message_count, 1);
+        assert_eq!(state.raw.len(), 1);
+        assert!(state.current_chord.is_none());
+
+        state.ingest_at(1_200, &[0xFE]);
+
+        assert_eq!(state.message_count, 1);
+        assert_eq!(state.raw.len(), 1);
+        assert_eq!(state.current_chord.as_ref().unwrap().notes[0].note, 60);
+    }
+
+    #[test]
     fn sound_switch_order_prefers_a_brief_overlap_over_silence() {
         assert_eq!(
             sound_switch_steps(PianoSoundMode::Local),
             [
                 SoundSwitchStep::LocalControl(true),
-                SoundSwitchStep::PianoteqOutput(false),
+                SoundSwitchStep::ReaperMasterMuted(true),
             ]
         );
         assert_eq!(
-            sound_switch_steps(PianoSoundMode::Pianoteq),
+            sound_switch_steps(PianoSoundMode::Vst),
             [
-                SoundSwitchStep::PianoteqOutput(true),
+                SoundSwitchStep::ReaperMasterMuted(false),
                 SoundSwitchStep::LocalControl(false),
             ]
         );

@@ -158,6 +158,12 @@ Pianoteq with its JSON-RPC server bound to localhost:
 & "C:\Program Files\Modartt\Pianoteq 9\Pianoteq 9.exe" --serve 127.0.0.1:8081
 ```
 
+For daily REAPER-hosted playing, use one `Garritan CFX` track and one reusable
+`Pianoteq Live` track. The global source switch enables Clavinova Local Control
+and mutes the REAPER Master for the physical-piano mode; VST mode unmutes the
+Master before disabling Local Control. Named Small Room, Studio, and Hall
+scenes adjust Pianoteq's reverb parameters independently of instrument presets.
+
 Keyestra groups presets by instrument, prioritizes licensed instruments, and
 stores full-preset and reverb-preset favorites in
 `%APPDATA%\keyestra\pianoteq-favorites.json`, shared by every phone and browser
@@ -192,9 +198,12 @@ their respective collection with a **Demo** badge.
 
 The **Piano** tab can also switch among preloaded REAPER instrument tracks,
 including sampled pianos such as Garritan CFX and Pianoteq models hosted as
-plug-ins. The selector uses REAPER's built-in web interface locally, confirms
-the resulting mute state, and includes a persistent one-tap A/B toggle. Direct
-Pianoteq RPC control remains available in the same tab.
+plug-ins. The selector uses REAPER's built-in web interface locally and
+confirms the resulting mute state. An optional local-only OSC connection lets
+the same page load curated REAPER host presets and adjust the active Pianoteq
+VST's Dynamics and room controls while REAPER remains the only ASIO host.
+Standalone Pianoteq RPC control remains available lower in the same tab when
+the standalone application is intentionally running.
 
 See [REAPER Piano Compare setup](docs/REAPER_PIANO_COMPARE.md) for the REAPER
 bootstrap ReaScript, one-time plug-in confirmation boundary, project layout,

@@ -5,6 +5,14 @@
 -- canonical project and project template, and writes Keyestra's piano config
 -- only when that config does not already exist.
 
+local _, current_project_path = reaper.EnumProjects(-1, "")
+if current_project_path:lower():match("keyestra piano live%.rpp$") then
+  local source = debug.getinfo(1, "S").source:sub(2)
+  local directory = source:match("^(.*[\\/])") or ""
+  dofile(directory .. "keyestra-piano-live-simplify.lua")
+  return
+end
+
 local PROJECT_SECTION = "KEYESTRA"
 local PROJECT_MARKER_KEY = "PIANO_COMPARE"
 local TRACK_ID_KEY = "P_EXT:KEYESTRA_PIANO_ID"
@@ -189,6 +197,12 @@ local function write_keyestra_config_if_missing(config_path)
 [reaper]
 address = "127.0.0.1:8080"
 timeout_ms = 800
+
+[pianoteq_vst]
+piano_id = "sk-ex"
+track = "Pianoteq SK-EX"
+fx = 1
+osc_address = "127.0.0.1:9000"
 
 [[piano]]
 id = "cfx"

@@ -20,6 +20,24 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Invoke-CargoCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $process = Start-Process `
+        -FilePath $script:cargoCommand `
+        -ArgumentList $Arguments `
+        -WorkingDirectory (Get-Location).Path `
+        -NoNewWindow `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "$Name failed with exit code $($process.ExitCode)."
+    }
+}
+
 function Get-PackageVersion {
     param([Parameter(Mandatory = $true)][string]$ManifestPath)
 
@@ -147,6 +165,17 @@ function Activate-Release {
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $manifestPath = Join-Path $workspace "Cargo.toml"
 $cargoOutput = [IO.Path]::GetFullPath((Join-Path $workspace "target\release"))
+$cargoDiscovery = Get-Command cargo -ErrorAction SilentlyContinue
+$cargoCommand = if ($null -ne $cargoDiscovery) { $cargoDiscovery.Source } else { $null }
+if ([string]::IsNullOrWhiteSpace($cargoCommand)) {
+    $userCargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
+    if (Test-Path -LiteralPath $userCargo) {
+        $cargoCommand = $userCargo
+    }
+    else {
+        throw "cargo was not found on PATH or at $userCargo."
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
     throw "LOCALAPPDATA is not set."
@@ -197,15 +226,18 @@ try {
     }
     $version = Get-PackageVersion -ManifestPath $manifestPath
 
-    Invoke-CheckedCommand "cargo fmt --check" { cargo fmt --check }
-    Invoke-CheckedCommand "cargo test" { cargo test }
+    Invoke-CargoCommand "cargo fmt --check" @("fmt", "--check")
+    Invoke-CargoCommand "cargo test" @("test")
 
     $previousBuildOverride = $env:KEYESTRA_BUILD_ID_OVERRIDE
     try {
         $env:KEYESTRA_BUILD_ID_OVERRIDE = $build
-        Invoke-CheckedCommand "cargo build --release" {
-            cargo build --release --bin keyestra --bin keyestra-tray --bin keyestra-monitor
-        }
+        Invoke-CargoCommand "cargo build --release" @(
+            "build", "--release",
+            "--bin", "keyestra",
+            "--bin", "keyestra-tray",
+            "--bin", "keyestra-monitor"
+        )
     }
     finally {
         $env:KEYESTRA_BUILD_ID_OVERRIDE = $previousBuildOverride
@@ -225,8 +257,10 @@ $requiredFiles = @(
     "examples\curve-mid-control.toml",
     "examples\reaper-pianos.toml",
     "scripts\reaper\keyestra-piano-compare-bootstrap.lua",
+    "scripts\reaper\keyestra-piano-live-simplify.lua",
     "scripts\reaper\keyestra-piano-compare-calibrate.lua",
-    "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua"
+    "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua",
+    "scripts\reaper\Keyestra.ReaperOSC"
 )
 
 if (Test-Path -LiteralPath $releaseDir) {
@@ -259,8 +293,10 @@ else {
             Copy-Item -LiteralPath (Join-Path $workspace "examples\$curve") -Destination (Join-Path $stagingDir "examples\$curve")
         }
         Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-bootstrap.lua")
+        Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-live-simplify.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-live-simplify.lua")
         Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-calibrate.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-calibrate.lua")
         Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-benchmark-bootstrap.lua")
+        Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\Keyestra.ReaperOSC") -Destination (Join-Path $stagingDir "scripts\reaper\Keyestra.ReaperOSC")
 
         Assert-RequiredFiles -Root $stagingDir -RelativePaths $requiredFiles
         Move-Item -LiteralPath $stagingDir -Destination $releaseDir

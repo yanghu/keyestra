@@ -182,25 +182,6 @@ impl PianoteqClient {
         self.fetch_controls()
     }
 
-    pub fn set_volume_normalized(&self, normalized_value: f64) -> Result<()> {
-        if !normalized_value.is_finite() || !(0.0..=1.0).contains(&normalized_value) {
-            return Err(anyhow!("Pianoteq volume value must be between 0 and 1"));
-        }
-        self.rpc(
-            "setParameters",
-            json!({ "list": [{ "id": "volume", "normalized_value": normalized_value }] }),
-        )?;
-        Ok(())
-    }
-
-    pub fn volume_normalized(&self) -> Result<f64> {
-        self.fetch_controls()?
-            .into_iter()
-            .find(|control| control.id == "volume")
-            .map(|control| control.normalized_value)
-            .ok_or_else(|| anyhow!("Pianoteq did not expose its volume control"))
-    }
-
     fn fetch_snapshot(
         &self,
     ) -> Result<(

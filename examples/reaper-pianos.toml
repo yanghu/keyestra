@@ -1,11 +1,158 @@
 [reaper]
-# This file matches scripts/reaper/keyestra-piano-compare-bootstrap.lua.
-# The bootstrap creates %APPDATA%\keyestra\reaper-pianos.toml when missing.
+# Daily Live config: one Garritan track and one reusable Pianoteq VST track.
 address = "127.0.0.1:8080"
 # If the REAPER web interface requires login, uncomment both lines:
 # username = "keyestra"
 # password = "change-me"
 timeout_ms = 800
+
+[cfx_vst]
+piano_id = "cfx"
+track = "Garritan CFX"
+fx = 1
+# Zero-based REAPER parameter index. Garritan documents CC007 as Master Volume.
+master_volume_parameter = 7
+osc_address = "127.0.0.1:9000"
+
+# Prototype control target. REAPER receives OSC on this PC only; the phone still
+# connects exclusively to Keyestra's normal web port.
+[pianoteq_vst]
+piano_id = "pianoteq-live"
+track = "Pianoteq Live"
+fx = 1
+osc_address = "127.0.0.1:9000"
+# Must match the OSC surface's device port. Keyestra listens only while fetching
+# fresh control values after a named preset is selected.
+osc_feedback_address = "127.0.0.1:9001"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-player"
+name = "PT | SK-EX | Player"
+reaper_preset = "PT | SK-EX | Player"
+
+[[pianoteq_vst.preset]]
+id = "boersendorfer-280vc-player"
+name = "PT | Börsendorfer 280VC | Player"
+reaper_preset = "PT | Börsendorfer 280VC | Player"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-warm"
+name = "PT | SK-EX | Warm"
+reaper_preset = "PT | SK-EX | Warm"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-prelude"
+name = "PT | SK-EX | Prelude"
+reaper_preset = "PT | SK-EX | Prelude"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-felt-1"
+name = "PT | SK-EX | Felt I"
+reaper_preset = "PT | SK-EX | Felt I"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-jazz-recording"
+name = "PT | SK-EX | Jazz Recording"
+reaper_preset = "PT | SK-EX | Jazz Recording"
+
+[[pianoteq_vst.preset]]
+id = "sk-ex-classical-recording"
+name = "PT | SK-EX | Classical Recording"
+reaper_preset = "PT | SK-EX | Classical Recording"
+
+[[pianoteq_vst.preset]]
+id = "boersendorfer-280vc-classical-recording"
+name = "PT | Börsendorfer 280VC | Classical Recording"
+reaper_preset = "PT | Börsendorfer 280VC | Classical Recording"
+
+[[pianoteq_vst.preset]]
+id = "boersendorfer-280vc-felt-1"
+name = "PT | Börsendorfer 280VC | Felt I"
+reaper_preset = "PT | Börsendorfer 280VC | Felt I"
+
+[[pianoteq_vst.preset]]
+id = "boersendorfer-280vc-warm"
+name = "PT | Börsendorfer 280VC | Warm"
+reaper_preset = "PT | Börsendorfer 280VC | Warm"
+
+[[pianoteq_vst.preset]]
+id = "steinway-d-player-demo"
+name = "PT | Steinway D | Player | Demo"
+reaper_preset = "PT | Steinway D | Player | Demo"
+demo = true
+
+[[pianoteq_vst.preset]]
+id = "steinway-b-player-demo"
+name = "PT | Steinway B | Player | Demo"
+reaper_preset = "PT | Steinway B | Player | Demo"
+demo = true
+
+[[pianoteq_vst.preset]]
+id = "erard-player"
+name = "PT | Erard | Player"
+reaper_preset = "PT | Erard | Player"
+
+[[pianoteq_vst.preset]]
+id = "u4-player-open-demo"
+name = "PT | U4 | Player Open | Demo"
+reaper_preset = "PT | U4 | Player Open | Demo"
+demo = true
+
+[[pianoteq_vst.preset]]
+id = "pleyel-player"
+name = "PT | Pleyel | Player"
+reaper_preset = "PT | Pleyel | Player"
+
+[[pianoteq_vst.preset]]
+id = "cp80-lo-stereo"
+name = "PT | CP80 | LO Stereo"
+reaper_preset = "PT | CP80 | LO Stereo"
+
+[[pianoteq_vst.preset]]
+id = "j-schants-415-player"
+name = "PT | J. Schants 415 | Player"
+reaper_preset = "PT | J. Schants 415 | Player"
+
+[[pianoteq_vst.preset]]
+id = "je-schmidt-415-player"
+name = "PT | J.E. Schmidt 415 | Player"
+reaper_preset = "PT | J.E. Schmidt 415 | Player"
+
+[[pianoteq_vst.preset]]
+id = "a-walter-415-player"
+name = "PT | A. Walter 415 | Player"
+reaper_preset = "PT | A. Walter 415 | Player"
+
+[[pianoteq_vst.preset]]
+id = "d-schoffstoss-415-player"
+name = "PT | D. Schoffstoss 415 | Player"
+reaper_preset = "PT | D. Schoffstoss 415 | Player"
+
+[[pianoteq_vst.preset]]
+id = "c-graf-415-player"
+name = "PT | C. Graf 415 | Player"
+reaper_preset = "PT | C. Graf 415 | Player"
+
+[[pianoteq_vst.reverb]]
+id = "small-room"
+name = "小房间"
+duration = 0.18
+mix = 0.16
+room_dimensions = 0.18
+
+[[pianoteq_vst.reverb]]
+id = "studio"
+name = "Studio"
+duration = 0.32
+mix = 0.22
+room_dimensions = 0.38
+
+[[pianoteq_vst.reverb]]
+id = "hall"
+name = "Hall"
+duration = 0.62
+mix = 0.30
+room_dimensions = 0.78
 
 [[piano]]
 id = "cfx"
@@ -13,16 +160,6 @@ name = "Garritan CFX"
 tracks = ["Garritan CFX"]
 
 [[piano]]
-id = "sk-ex"
-name = "Pianoteq SK-EX"
-tracks = ["Pianoteq SK-EX"]
-
-[[piano]]
-id = "steinway-d"
-name = "Pianoteq Steinway D"
-tracks = ["Pianoteq Steinway D"]
-
-[[piano]]
-id = "280vc"
-name = "Pianoteq Bösendorfer 280VC"
-tracks = ["Pianoteq Bösendorfer 280VC"]
+id = "pianoteq-live"
+name = "Pianoteq Live"
+tracks = ["Pianoteq Live"]

@@ -18,7 +18,50 @@ main { width:min(1280px, calc(100vw - 32px)); margin:0 auto; padding:24px 0 32px
 .pianoteq-view { display:none; }
 main.piano-mode > :not(.update-banner):not(.app-tabs):not(.pianoteq-view):not(.build-version) { display:none !important; }
 main.piano-mode > .pianoteq-view { display:block; }
-.pianoteq-panel { max-width:720px; margin:0 auto; }
+.pianoteq-panel,.reaper-live-panel { max-width:720px; margin:0 auto; }
+.reaper-live-panel { margin-bottom:12px; }
+.reaper-current { display:grid; gap:3px; margin-top:12px; padding:13px 14px; border-radius:10px; background:var(--accent); color:#fff; }
+.reaper-current span,.reaper-current small { color:rgba(255,255,255,.76); font-size:12px; font-weight:700; }
+.reaper-current strong { font-size:clamp(19px,4.2vw,28px); line-height:1.16; }
+.reaper-current small.error { color:#ffe0d8; }
+.reaper-piano-grid,.reaper-preset-grid,.reaper-reverb-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:10px; }
+.reaper-piano-grid button,.reaper-preset-grid button,.reaper-reverb-grid button { min-height:48px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:8px 10px; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.reaper-piano-grid button.active,.reaper-preset-grid button.active,.reaper-reverb-grid button.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.reaper-piano-grid button:disabled,.reaper-preset-grid button:disabled,.reaper-reverb-grid button:disabled { opacity:.48; cursor:wait; }
+.reaper-preset-grid { display:block; }
+.reaper-preset-group { margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
+.reaper-preset-group > strong { display:block; margin-bottom:7px; color:var(--accent); font-size:12px; }
+.reaper-preset-group > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.reaper-demo-presets { margin-top:10px; border:1px dashed var(--line); border-radius:9px; background:#faf9f6; }
+.reaper-demo-presets > summary { display:flex; min-height:48px; align-items:center; gap:8px; padding:8px 11px; color:var(--muted); font-size:13px; font-weight:850; cursor:pointer; list-style:none; }
+.reaper-demo-presets > summary::-webkit-details-marker { display:none; }
+.reaper-demo-presets > summary::after { content:"⌄"; margin-left:auto; font-size:17px; transform:rotate(-90deg); }
+.reaper-demo-presets[open] > summary::after { transform:none; }
+.reaper-demo-presets > summary small { min-width:23px; border-radius:999px; background:var(--soft); padding:2px 6px; text-align:center; }
+.reaper-demo-presets > div { padding:0 8px 8px; }
+.cfx-calibration { margin-top:10px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
+.cfx-calibration > summary { display:flex; min-height:48px; align-items:center; padding:8px 11px; color:var(--accent); cursor:pointer; list-style:none; }
+.cfx-calibration > summary::-webkit-details-marker { display:none; }
+.cfx-calibration > summary::after { content:"⌄"; margin-left:auto; color:var(--muted); font-size:17px; transform:rotate(-90deg); }
+.cfx-calibration[open] > summary::after { transform:none; }
+.cfx-calibration > summary span { display:grid; gap:2px; }
+.cfx-calibration > summary strong { font-size:13px; }
+.cfx-calibration > summary small { color:var(--muted); font-size:10px; }
+.cfx-calibration > label { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; padding:2px 11px 10px; }
+.cfx-calibration > label span { color:var(--muted); font-size:11px; font-weight:850; }
+.cfx-calibration > label input { grid-column:1/-1; width:100%; accent-color:var(--accent); }
+.cfx-calibration > label output { color:var(--accent); font-size:12px; font-weight:900; }
+.cfx-calibration > small { display:block; padding:0 11px 10px; color:var(--muted); font-size:10px; line-height:1.4; }
+.reaper-vst-remote { margin-top:12px; border-top:1px solid var(--line); padding-top:12px; }
+.reaper-vst-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }
+.reaper-vst-controls label { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; align-items:center; padding:10px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
+.reaper-vst-controls span { color:var(--muted); font-size:11px; font-weight:850; }
+.reaper-vst-controls input { grid-column:1/-1; width:100%; accent-color:var(--accent); }
+.reaper-vst-controls output { color:var(--accent); font-size:12px; font-weight:900; }
+.reaper-vst-toggle { min-height:44px; margin-top:8px; border:1px solid var(--accent); border-radius:8px; background:#fff; color:var(--accent); padding:0 12px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.reaper-vst-toggle.active { background:var(--accent); color:#fff; }
+.reaper-vst-toggle:disabled { opacity:.48; cursor:wait; }
+.reaper-vst-status { display:block; min-height:17px; margin-top:7px; color:var(--muted); font-size:11px; font-weight:700; }
 .pianoteq-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pianoteq-heading h2 { margin-top:3px; font-size:24px; }
 .pianoteq-eyebrow { color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.14em; }

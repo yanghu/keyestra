@@ -1,0 +1,25 @@
+# Minimal REAPER OSC pattern for Keyestra's local Pianoteq VST prototype.
+# In REAPER, add an OSC control surface that receives on UDP 9000 and uses
+# this pattern file. Keyestra targets explicit track, FX, and parameter numbers.
+
+DEVICE_TRACK_COUNT 32
+DEVICE_SEND_COUNT 0
+DEVICE_RECEIVE_COUNT 0
+DEVICE_FX_COUNT 4
+DEVICE_FX_PARAM_COUNT 16
+DEVICE_FX_INST_PARAM_COUNT 16
+DEVICE_MARKER_COUNT 0
+DEVICE_REGION_COUNT 0
+
+TRACK_NAME s/track/@/name
+TRACK_MUTE b/track/@/mute
+FX_NAME s/track/@/fx/@/name
+FX_PRESET s/track/@/fx/@/preset
+FX_PARAM_VALUE n/fxparam/@/value n/fx/@/fxparam/@/value n/track/@/fx/@/fxparam/@/value
+
+# Keyestra sends these only after a named Pianoteq preset is loaded. Selecting
+# parameter banks asks REAPER for one fresh snapshot; there is no continuous
+# parameter polling from the Monitor page.
+DEVICE_TRACK_SELECT i/device/track/select
+DEVICE_FX_SELECT i/device/fx/select
+DEVICE_FX_PARAM_BANK_SELECT i/device/fxparam/bank/select

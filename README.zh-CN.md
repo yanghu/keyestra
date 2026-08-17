@@ -142,10 +142,13 @@ Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。�
 
 ### 对比 REAPER 中托管的钢琴
 
-**Piano** 标签页也可以切换 REAPER 中预先加载的乐器轨道，包括 Garritan
-CFX 等采样钢琴和以插件方式运行的 Pianoteq 型号。选择器通过本机的 REAPER
-Web 界面控制并确认最终静音状态，还提供会保存在手机浏览器中的一键 A/B
-切换。原有的 Pianoteq RPC 控制仍保留在同一标签页中。
+日常 Live 工程只需要 `Garritan CFX` 和一个可复用的 `Pianoteq Live` 轨道。
+**Piano** 标签页可以切换这两个轨道，载入整理过的 REAPER host preset，并直接
+调整 Pianoteq VST 的 Dynamics 和空间参数。小房间、Studio、Hall 等混响环境是
+独立场景，不会替换琴体 preset。页面顶部的全局声音开关在“琴体”模式打开
+Clavinova Local Control 并静音 REAPER Master；在“REAPER VST”模式恢复 Master
+并关闭 Local Control。这样 REAPER 始终是唯一的 ASIO 宿主。原有的 Pianoteq
+standalone RPC 高级控制仍保留在下方，但不是 Live 模式的依赖。
 
 REAPER 工程布局、Web 界面和可配置钢琴列表的设置方法请参阅
 [REAPER Piano Compare 设置](docs/REAPER_PIANO_COMPARE.md)。其中包含可重复运行的

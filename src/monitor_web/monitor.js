@@ -36,20 +36,240 @@ const workingRanges = [
   {min:108,max:127,label:"ff",className:"ff"},
 ];
 const $ = (id) => document.getElementById(id);
+const reaperVstControlKey = "keyestra-reaper-vst-controls";
+let reaperState = { pianos:[], activePianoId:null, available:false, busy:false };
+let reaperVstState = { configured:false, available:false, presets:[], reverbs:[], busy:false, activePresetId:null, activeReverbId:null };
+let cfxState = { configured:false, available:false, masterVolumeCc:null, busy:false };
+function cfxVolumeLabel(value){
+  const cc=Math.max(0,Math.min(127,Math.round(Number(value))));
+  const attenuation=cc===0 ? "−∞ dB" : `≈ ${(20*Math.log10(cc/127)).toFixed(1)} dB`;
+  return `CC7 ${cc} · ${attenuation}`;
+}
+function renderCfx(data={}){
+  cfxState={...cfxState,...data};
+  $("cfxCalibration").hidden=!cfxState.configured;
+  const input=$("cfxMasterVolume");
+  const hasValue=Number.isInteger(cfxState.masterVolumeCc);
+  if(hasValue) input.value=String(cfxState.masterVolumeCc);
+  input.disabled=!cfxState.available||cfxState.busy;
+  const label=hasValue ? cfxVolumeLabel(cfxState.masterVolumeCc) : "尚未校准";
+  $("cfxMasterVolumeOutput").textContent=label;
+  $("cfxCalibrationSummary").textContent=label;
+  if(data.error) $("cfxCalibrationStatus").textContent=data.error;
+}
+async function setCfxMasterVolume(value){
+  if(cfxState.busy || !cfxState.available) return;
+  const cc=Math.max(0,Math.min(127,Math.round(Number(value))));
+  cfxState.busy=true; renderCfx();
+  $("cfxCalibrationStatus").textContent="正在写入 CFX 并保存 Live 工程…";
+  try{
+    const response=await fetch(`/reaper-cfx?${new URLSearchParams({masterVolumeCc:String(cc)})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "CFX 音量保存失败");
+    cfxState.busy=false; renderCfx(data);
+    $("cfxCalibrationStatus").textContent="已写入 CFX Master Volume，并保存 Live 工程。";
+  }catch(error){
+    cfxState.busy=false; renderCfx();
+    $("cfxCalibrationStatus").textContent=error.message || "CFX 音量保存失败";
+  }
+}
+function splitReaperPresetName(name){
+  const parts=String(name || "").split("|").map(part=>part.trim()).filter(Boolean);
+  if(parts.at(-1)?.toLowerCase()==="demo") parts.pop();
+  return parts.length>=3 ? {instrument:parts[1],preset:parts.slice(2).join(" · ")} : {instrument:"Pianoteq",preset:String(name || "Preset")};
+}
+function renderReaperPresetGroupList(presetList){
+  const groups=new Map();
+  presetList.forEach(preset=>{
+    const labels=splitReaperPresetName(preset.name);
+    const items=groups.get(labels.instrument) || [];
+    items.push({...preset,shortName:labels.preset}); groups.set(labels.instrument,items);
+  });
+  return [...groups].map(([instrument,presets])=>`<section class="reaper-preset-group"><strong>${escapeHtml(instrument)}</strong><div>${presets.map(preset=>
+    `<button type="button" class="${preset.id===reaperVstState.activePresetId?"active":""}" data-reaper-vst-preset="${encodeURIComponent(preset.id)}" ${!reaperVstState.available||reaperVstState.busy?"disabled":""}>${escapeHtml(preset.shortName)}</button>`
+  ).join("")}</div></section>`).join("");
+}
+function renderReaperPresetGroups(){
+  const regular=reaperVstState.presets.filter(preset=>!preset.demo);
+  const demos=reaperVstState.presets.filter(preset=>preset.demo);
+  const demoSection=demos.length ? `<details class="reaper-demo-presets"><summary><span>Demo 琴</span><small>${demos.length}</small></summary><div>${renderReaperPresetGroupList(demos)}</div></details>` : "";
+  return renderReaperPresetGroupList(regular)+demoSection;
+}
+function renderReaper(data={}){
+  reaperState.pianos=data.pianos || reaperState.pianos;
+  reaperState.activePianoId=data.activePianoId || null;
+  reaperState.available=Boolean(data.available);
+  const active=reaperState.pianos.find(piano=>piano.id===reaperState.activePianoId);
+  $("reaperCurrent").textContent=active?.name || (data.configured ? "选择一个声音" : "尚未配置");
+  $("reaperStatus").textContent=data.available ? (data.error || `${reaperState.pianos.length} 个声音已就绪`) : (data.error || "REAPER 不可用");
+  $("reaperStatus").classList.toggle("error",!data.available);
+  $("reaperPianoList").innerHTML=reaperState.pianos.map(piano=>
+    `<button type="button" class="${piano.id===reaperState.activePianoId?"active":""}" data-reaper-piano="${encodeURIComponent(piano.id)}" ${!data.available||reaperState.busy?"disabled":""}>${escapeHtml(piano.name)}</button>`
+  ).join("") || `<div class="pianoteq-empty">没有配置 REAPER 声音</div>`;
+}
+function renderReaperVst(data={}){
+  reaperVstState={...reaperVstState,...data,presets:data.presets || reaperVstState.presets,reverbs:data.reverbs || reaperVstState.reverbs};
+  $("reaperVstRemote").hidden=!reaperVstState.configured;
+  $("reaperVstTarget").textContent=reaperVstState.available ? `${data.track || "Pianoteq"} · FX ${data.fx || 1}` : (data.error || "OSC 控制尚未就绪");
+  $("reaperPresetList").hidden=!reaperVstState.presets.length;
+  $("reaperPresetList").innerHTML=renderReaperPresetGroups();
+  $("reaperReverbList").hidden=!reaperVstState.reverbs.length;
+  $("reaperReverbList").innerHTML=reaperVstState.reverbs.map(reverb=>
+    `<button type="button" class="${reverb.id===reaperVstState.activeReverbId?"active":""}" data-reaper-vst-reverb="${encodeURIComponent(reverb.id)}" ${!reaperVstState.available||reaperVstState.busy?"disabled":""}>${escapeHtml(reverb.name)}</button>`
+  ).join("");
+  document.querySelectorAll("[data-reaper-vst-control] input").forEach(input=>input.disabled=!reaperVstState.available||reaperVstState.busy);
+  $("reaperVstReverb").disabled=!reaperVstState.available||reaperVstState.busy;
+}
+function applyFreshReaperVstParameters(data={}){
+  if(!data.parametersFresh || !data.parameters) return false;
+  for(const [parameter,value] of Object.entries(data.parameters)){
+    if(parameter==="reverb_switch") continue;
+    const input=document.querySelector(`[data-reaper-vst-control="${parameter}"] input`);
+    if(input && Number.isFinite(Number(value))){
+      input.value=String(value);
+      input.dispatchEvent(new Event("input"));
+      saveReaperVstControl(parameter,value);
+    }
+  }
+  const reverbOn=Number(data.parameters.reverb_switch)>=0.5;
+  $("reaperVstReverb").setAttribute("aria-pressed",String(reverbOn));
+  $("reaperVstReverb").classList.toggle("active",reverbOn);
+  $("reaperVstReverb").textContent=reverbOn ? "Reverb On" : "Reverb Off";
+  saveReaperVstControl("reverb_switch",reverbOn ? 1 : 0);
+  return true;
+}
+async function fetchReaperRemote(showBusy=false){
+  if(showBusy) $("reaperRefresh").disabled=true;
+  try{
+    const [pianosResponse,vstResponse,cfxResponse,soundModeResponse]=await Promise.all([
+      fetch("/reaper-pianos",{cache:"no-store"}),
+      fetch("/reaper-pianoteq",{cache:"no-store"}),
+      fetch("/reaper-cfx",{cache:"no-store"}),
+      fetch("/sound-mode",{cache:"no-store"}),
+    ]);
+    if(!pianosResponse.ok || !vstResponse.ok || !cfxResponse.ok || !soundModeResponse.ok) throw new Error("REAPER 控制状态不可用");
+    renderReaper(await pianosResponse.json());
+    renderReaperVst(await vstResponse.json());
+    renderCfx(await cfxResponse.json());
+    renderSoundMode(await soundModeResponse.json());
+  }catch(error){
+    renderReaper({available:false,error:error.message || "REAPER 控制状态不可用"});
+  }finally{ if(showBusy) $("reaperRefresh").disabled=false; }
+}
+async function activateReaperPiano(id){
+  if(!id || reaperState.busy || !reaperState.available) return;
+  reaperState.busy=true; renderReaper({...reaperState,configured:true,error:"正在切换…"});
+  try{
+    const response=await fetch(`/reaper-pianos?${new URLSearchParams({id})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "声音切换失败");
+    reaperState.busy=false; renderReaper(data);
+  }catch(error){
+    reaperState.busy=false; await fetchReaperRemote();
+    $("reaperStatus").textContent=error.message || "声音切换失败";
+  }
+}
+async function setReaperVstParameter(parameter,value){
+  if(reaperVstState.busy || !reaperVstState.available) return;
+  reaperVstState.busy=true; renderReaperVst(reaperVstState);
+  $("reaperVstStatus").textContent="正在发送到 REAPER…";
+  const params=new URLSearchParams({action:"parameter",parameter,value:Number(value).toFixed(4)});
+  try{
+    const response=await fetch(`/reaper-pianoteq?${params}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "Pianoteq 参数发送失败");
+    $("reaperVstStatus").textContent="已发送到 REAPER；移动插件控件可核对结果。";
+  }catch(error){ $("reaperVstStatus").textContent=error.message || "Pianoteq 参数发送失败"; }
+  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
+}
+async function loadReaperVstPreset(id){
+  if(!id || reaperVstState.busy || !reaperVstState.available) return;
+  reaperVstState.busy=true; renderReaperVst(reaperVstState);
+  $("reaperVstStatus").textContent="正在载入声音插槽…";
+  const params=new URLSearchParams({action:"preset",id});
+  try{
+    const response=await fetch(`/reaper-pianoteq?${params}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "声音插槽载入失败");
+    reaperVstState.activePresetId=id;
+    const parametersFresh=applyFreshReaperVstParameters(data);
+    if(reaperVstState.activeReverbId){
+      const reverbResponse=await fetch(`/reaper-pianoteq?${new URLSearchParams({action:"reverb",id:reaperVstState.activeReverbId})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+      const reverbData=await reverbResponse.json();
+      if(!reverbResponse.ok) throw new Error(reverbData.error || "琴体已切换，但混响环境恢复失败");
+      const reverb=reaperVstState.reverbs.find(candidate=>candidate.id===reaperVstState.activeReverbId);
+      if(reverb){
+        for(const [parameter,value] of [["reverb_duration",reverb.duration],["reverb_mix",reverb.mix],["room_dimensions",reverb.roomDimensions]]){
+          const input=document.querySelector(`[data-reaper-vst-control="${parameter}"] input`);
+          if(input){ input.value=String(value); input.dispatchEvent(new Event("input")); saveReaperVstControl(parameter,value); }
+        }
+        $("reaperVstReverb").setAttribute("aria-pressed","true");
+        $("reaperVstReverb").classList.add("active");
+        $("reaperVstReverb").textContent="Reverb On";
+        saveReaperVstControl("reverb_switch",1);
+      }
+    }
+    $("reaperVstStatus").textContent=!parametersFresh
+      ? `琴体/Preset 已切换，但滑块刷新失败：${data.parameterError || "REAPER 没有返回参数"}`
+      : reaperVstState.activeReverbId
+        ? "琴体/Preset 已切换；已刷新真实 Dynamics，并恢复当前混响环境。"
+        : "琴体/Preset 已切换；滑块已刷新为插件当前值。";
+  }catch(error){ $("reaperVstStatus").textContent=error.message || "声音插槽载入失败"; }
+  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); await fetchReaperRemote(); }
+}
+async function loadReaperVstReverb(id){
+  if(!id || reaperVstState.busy || !reaperVstState.available) return;
+  const reverb=reaperVstState.reverbs.find(candidate=>candidate.id===id);
+  if(!reverb) return;
+  reaperVstState.busy=true; renderReaperVst(reaperVstState);
+  $("reaperVstStatus").textContent="正在载入混响环境…";
+  try{
+    const response=await fetch(`/reaper-pianoteq?${new URLSearchParams({action:"reverb",id})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "混响环境载入失败");
+    reaperVstState.activeReverbId=id;
+    try { localStorage.setItem("keyestra-reaper-vst-reverb",id); } catch(error) {}
+    for(const [parameter,value] of [["reverb_duration",reverb.duration],["reverb_mix",reverb.mix],["room_dimensions",reverb.roomDimensions]]){
+      const input=document.querySelector(`[data-reaper-vst-control="${parameter}"] input`);
+      if(input){ input.value=String(value); input.dispatchEvent(new Event("input")); saveReaperVstControl(parameter,value); }
+    }
+    $("reaperVstReverb").setAttribute("aria-pressed","true");
+    $("reaperVstReverb").classList.add("active");
+    $("reaperVstReverb").textContent="Reverb On";
+    $("reaperVstStatus").textContent=`已载入混响环境：${reverb.name}`;
+  }catch(error){ $("reaperVstStatus").textContent=error.message || "混响环境载入失败"; }
+  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
+}
+function restoreReaperVstControls(){
+  let saved={};
+  try { saved=JSON.parse(localStorage.getItem(reaperVstControlKey) || "{}"); } catch(error) {}
+  document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
+    const input=control.querySelector("input");
+    const value=Number(saved[control.dataset.reaperVstControl]);
+    if(Number.isFinite(value)) input.value=String(value);
+    control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`;
+  });
+  try { reaperVstState.activeReverbId=localStorage.getItem("keyestra-reaper-vst-reverb"); } catch(error) {}
+}
+function saveReaperVstControl(parameter,value){
+  let saved={};
+  try { saved=JSON.parse(localStorage.getItem(reaperVstControlKey) || "{}"); } catch(error) {}
+  try { localStorage.setItem(reaperVstControlKey,JSON.stringify({...saved,[parameter]:Number(value)})); } catch(error) {}
+}
 let pianoteqState = { available: false, presets: [], reverbPresets: [], favorites: [], reverbFavorites: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, currentPresetName: null, currentPresetBank: null, currentReverbPreset: null, showAll: false };
-let soundModeState = { mode:"unknown", pianoOutput:"Clavinova", localControl:null, pianoteqMuted:null, pianoteqAvailable:false, busy:false };
+let soundModeState = { mode:"unknown", pianoOutput:"Clavinova", localControl:null, reaperMasterMuted:null, reaperAvailable:false, busy:false };
 function renderSoundMode(data={}){
   soundModeState={...soundModeState,...data};
   document.querySelectorAll("[data-sound-mode]").forEach(button=>{
     button.classList.toggle("active",button.dataset.soundMode===soundModeState.mode);
-    button.disabled=soundModeState.busy;
+    button.disabled=soundModeState.busy || soundModeState.reaperAvailable===false;
   });
   const status=$('soundModeStatus');
   status.classList.remove("error");
   if(soundModeState.busy) status.textContent="正在切换声音来源…";
-  else if(soundModeState.mode==="local") status.textContent=`${soundModeState.pianoOutput} Local Control 开 · Pianoteq 静音`;
-  else if(soundModeState.mode==="pianoteq") status.textContent=`${soundModeState.pianoOutput} Local Control 关 · Pianoteq 发声`;
-  else status.textContent="尚未同步；请选择琴体或 Pianoteq";
+  else if(soundModeState.mode==="local") status.textContent=`${soundModeState.pianoOutput} Local Control 开 · REAPER Master 静音`;
+  else if(soundModeState.mode==="vst") status.textContent=`${soundModeState.pianoOutput} Local Control 关 · REAPER VST 发声`;
+  else status.textContent="尚未同步；请选择琴体或 REAPER VST";
 }
 async function fetchSoundMode(){
   try{
@@ -63,7 +283,7 @@ async function fetchSoundMode(){
   }
 }
 async function setSoundMode(mode){
-  if(soundModeState.busy || !["local","pianoteq"].includes(mode)) return;
+  if(soundModeState.busy || !["local","vst"].includes(mode)) return;
   soundModeState.busy=true; renderSoundMode();
   try{
     const response=await fetch(`/sound-mode?${new URLSearchParams({mode})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
@@ -287,7 +507,6 @@ function renderPianoteqList(){
 }
 async function fetchPianoteq(){
   $("pianoteqRefresh").disabled=true;
-  fetchSoundMode();
   try{
     const [response,favoritesResponse]=await Promise.all([
       fetch("/pianoteq",{cache:"no-store"}),
@@ -408,8 +627,42 @@ document.querySelectorAll("[data-app-tab]").forEach(button=>button.addEventListe
   document.querySelector("main").classList.toggle("piano-mode",piano);
   document.querySelectorAll("[data-app-tab]").forEach(candidate=>candidate.classList.toggle("active",candidate===button));
   try { localStorage.setItem("keyestra-active-tab",button.dataset.appTab); } catch(error) {}
-  if(piano) fetchPianoteq();
+  if(piano) { fetchReaperRemote(); fetchPianoteq(); }
 }));
+$("reaperRefresh").addEventListener("click",()=>fetchReaperRemote(true));
+$("reaperPianoList").addEventListener("click",event=>{
+  const button=event.target.closest("[data-reaper-piano]");
+  if(button) activateReaperPiano(decodeURIComponent(button.dataset.reaperPiano));
+});
+$("reaperPresetList").addEventListener("click",event=>{
+  const button=event.target.closest("[data-reaper-vst-preset]");
+  if(button) loadReaperVstPreset(decodeURIComponent(button.dataset.reaperVstPreset));
+});
+$("reaperReverbList").addEventListener("click",event=>{
+  const button=event.target.closest("[data-reaper-vst-reverb]");
+  if(button) loadReaperVstReverb(decodeURIComponent(button.dataset.reaperVstReverb));
+});
+$("cfxMasterVolume").addEventListener("input",event=>{
+  $("cfxMasterVolumeOutput").textContent=cfxVolumeLabel(event.target.value);
+});
+$("cfxMasterVolume").addEventListener("change",event=>setCfxMasterVolume(event.target.value));
+document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
+  const input=control.querySelector("input");
+  input.addEventListener("input",()=>{ control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`; });
+  input.addEventListener("change",()=>{
+    saveReaperVstControl(control.dataset.reaperVstControl,input.value);
+    setReaperVstParameter(control.dataset.reaperVstControl,input.value);
+  });
+});
+$("reaperVstReverb").addEventListener("click",()=>{
+  const next=$("reaperVstReverb").getAttribute("aria-pressed")!=="true";
+  $("reaperVstReverb").setAttribute("aria-pressed",String(next));
+  $("reaperVstReverb").classList.toggle("active",next);
+  $("reaperVstReverb").textContent=next ? "Reverb On" : "Reverb Off";
+  setReaperVstParameter("reverb_switch",next ? 1 : 0);
+});
+restoreReaperVstControls();
+setInterval(()=>{ if(document.querySelector("main").classList.contains("piano-mode") && !reaperState.busy && !reaperVstState.busy) fetchReaperRemote(); },2000);
 $("pianoteqRefresh").addEventListener("click",fetchPianoteq);
 document.querySelectorAll("[data-sound-mode]").forEach(button=>button.addEventListener("click",()=>setSoundMode(button.dataset.soundMode)));
 $("pianoteqSearch").addEventListener("input",renderPianoteqList);
@@ -977,6 +1230,7 @@ fetchMetronome();
 connectMetronomeEvents();
 let practiceState = null;
 let practiceBusy = false;
+let practiceFetchPending = false;
 let practiceFormInitialized = false;
 function practiceIsActive(practice){
   return ["countIn","running","paused"].includes(practice?.status);
@@ -1044,12 +1298,14 @@ function renderPractice(practice){
   });
 }
 async function fetchPractice(){
+  if(document.hidden || practiceFetchPending) return;
+  practiceFetchPending=true;
   try{
     renderPractice(await fetch("/practice",{cache:"no-store"}).then(response=>response.json()));
     $("practiceMessage").textContent="";
   }catch(error){
     $("practiceMessage").textContent="节奏练习服务离线";
-  }
+  }finally{ practiceFetchPending=false; }
 }
 async function practiceAction(action){
   if(practiceBusy) return;
@@ -1091,7 +1347,9 @@ fetchPractice();
 setInterval(fetchPractice,180);
 let recorderState = null;
 let recorderBusy = false;
+let recorderFetchPending = false;
 let cfxRenderState = {available:false,jobs:[]};
+let cfxRenderFetchPending = false;
 function formatRecorderDuration(milliseconds){
   const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -1155,12 +1413,14 @@ function renderCfxActions(recordingName){
   return `${renderCfxAction(recordingName,"mp3")}${renderCfxAction(recordingName,"wav")}`;
 }
 async function fetchCfxRenders(){
+  if(document.hidden || cfxRenderFetchPending) return;
+  cfxRenderFetchPending=true;
   try{
     cfxRenderState=await fetch("/render/cfx",{cache:"no-store"}).then(response=>response.json());
     if(recorderState) renderRecorder(recorderState);
   } catch(error){
     cfxRenderState={available:false,jobs:[],unavailableReason:"CFX render service offline"};
-  }
+  } finally { cfxRenderFetchPending=false; }
 }
 async function startCfxRender(recordingName,format){
   try{
@@ -1182,11 +1442,13 @@ $("recorderFileList").addEventListener("click",event=>{
   if(button && !button.disabled) startCfxRender(button.dataset.cfxRecording,button.dataset.cfxFormat);
 });
 async function fetchRecorder(){
+  if(document.hidden || recorderFetchPending) return;
+  recorderFetchPending=true;
   try{ renderRecorder(await fetch("/recorder",{cache:"no-store"}).then(response=>response.json())); }
   catch(e){
     $("recorderMessage").textContent="Recorder offline";
     $("recorderMessage").classList.remove("ok");
-  }
+  } finally { recorderFetchPending=false; }
 }
 async function recorderAction(button){
   if(recorderBusy) return;

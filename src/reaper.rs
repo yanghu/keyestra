@@ -2,14 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_ADDRESS: &str = "127.0.0.1:8080";
+const DEFAULT_OSC_ADDRESS: &str = "127.0.0.1:9000";
+const DEFAULT_OSC_FEEDBACK_ADDRESS: &str = "127.0.0.1:9001";
+const TOGGLE_MASTER_MUTE_COMMAND: &str = "14";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +22,8 @@ struct ReaperConfig {
     reaper: ReaperConnectionConfig,
     #[serde(rename = "piano")]
     pianos: Vec<PianoConfig>,
+    pianoteq_vst: Option<PianoteqVstConfig>,
+    cfx_vst: Option<CfxVstConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +56,56 @@ struct PianoConfig {
     tracks: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PianoteqVstConfig {
+    piano_id: String,
+    track: String,
+    #[serde(default = "default_fx_number")]
+    fx: usize,
+    #[serde(default = "default_osc_address")]
+    osc_address: String,
+    #[serde(default = "default_osc_feedback_address")]
+    osc_feedback_address: String,
+    #[serde(default, rename = "preset")]
+    presets: Vec<PianoteqVstPresetConfig>,
+    #[serde(default, rename = "reverb")]
+    reverbs: Vec<PianoteqVstReverbConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PianoteqVstPresetConfig {
+    id: String,
+    name: String,
+    reaper_preset: String,
+    #[serde(default)]
+    demo: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PianoteqVstReverbConfig {
+    id: String,
+    name: String,
+    duration: f32,
+    mix: f32,
+    room_dimensions: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CfxVstConfig {
+    piano_id: String,
+    track: String,
+    #[serde(default = "default_fx_number")]
+    fx: usize,
+    #[serde(default = "default_cfx_master_parameter")]
+    master_volume_parameter: usize,
+    #[serde(default = "default_osc_address")]
+    osc_address: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReaperPiano {
@@ -65,6 +121,53 @@ pub struct ReaperSnapshot {
     pub available: bool,
     pub active_piano_id: Option<String>,
     pub pianos: Vec<ReaperPiano>,
+    pub config_path: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaperPianoteqPreset {
+    pub id: String,
+    pub name: String,
+    pub demo: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaperPianoteqReverb {
+    pub id: String,
+    pub name: String,
+    pub duration: f32,
+    pub mix: f32,
+    pub room_dimensions: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaperPianoteqSnapshot {
+    pub configured: bool,
+    pub available: bool,
+    pub piano_id: Option<String>,
+    pub track: Option<String>,
+    pub fx: Option<usize>,
+    pub presets: Vec<ReaperPianoteqPreset>,
+    pub reverbs: Vec<ReaperPianoteqReverb>,
+    pub parameters: HashMap<String, f32>,
+    pub parameters_fresh: bool,
+    pub parameter_error: Option<String>,
+    pub config_path: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaperCfxSnapshot {
+    pub configured: bool,
+    pub available: bool,
+    pub track: Option<String>,
+    pub fx: Option<usize>,
+    pub master_volume_cc: Option<u8>,
     pub config_path: String,
     pub error: Option<String>,
 }
@@ -176,6 +279,191 @@ impl ReaperClient {
         })
     }
 
+    pub fn master_muted(&self) -> Result<bool> {
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| anyhow!(error.clone()))?;
+        let body = reaper_request(&config.reaper, "TRACK")?;
+        parse_master_muted(&body)
+    }
+
+    pub fn set_master_muted(&self, muted: bool) -> Result<bool> {
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| anyhow!(error.clone()))?;
+        if self.master_muted()? == muted {
+            return Ok(muted);
+        }
+
+        let body = reaper_request(
+            &config.reaper,
+            &format!("{TOGGLE_MASTER_MUTE_COMMAND};TRACK"),
+        )?;
+        let confirmed = parse_master_muted(&body)?;
+        if confirmed != muted {
+            return Err(anyhow!(
+                "REAPER did not confirm the requested Master mute state"
+            ));
+        }
+        Ok(confirmed)
+    }
+
+    pub fn pianoteq_snapshot(&self) -> ReaperPianoteqSnapshot {
+        let config = match &self.config {
+            Ok(config) => config,
+            Err(error) => return self.unavailable_pianoteq(false, error.clone()),
+        };
+        let vst = match &config.pianoteq_vst {
+            Some(vst) => vst,
+            None => {
+                return self.unavailable_pianoteq(
+                    false,
+                    "REAPER Pianoteq VST control is not configured".to_string(),
+                )
+            }
+        };
+        match fetch_tracks(&config.reaper).and_then(|tracks| resolve_vst_track(vst, &tracks)) {
+            Ok(_) => public_pianoteq_snapshot(&self.config_path, vst, true, None),
+            Err(error) => {
+                public_pianoteq_snapshot(&self.config_path, vst, false, Some(error.to_string()))
+            }
+        }
+    }
+
+    pub fn cfx_snapshot(&self) -> ReaperCfxSnapshot {
+        let config = match &self.config {
+            Ok(config) => config,
+            Err(error) => return self.unavailable_cfx(false, error.clone()),
+        };
+        let cfx = match &config.cfx_vst {
+            Some(cfx) => cfx,
+            None => {
+                return self.unavailable_cfx(
+                    false,
+                    "REAPER CFX VST control is not configured".to_string(),
+                )
+            }
+        };
+        match fetch_tracks(&config.reaper).and_then(|tracks| resolve_cfx_track(cfx, &tracks)) {
+            Ok(_) => self.public_cfx_snapshot(cfx, true, None),
+            Err(error) => self.public_cfx_snapshot(cfx, false, Some(error.to_string())),
+        }
+    }
+
+    pub fn set_cfx_master_volume(&self, cc_value: u8) -> Result<ReaperCfxSnapshot> {
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| anyhow!(error.clone()))?;
+        let cfx = config
+            .cfx_vst
+            .as_ref()
+            .ok_or_else(|| anyhow!("REAPER CFX VST control is not configured"))?;
+        let tracks = fetch_tracks(&config.reaper)?;
+        let track_index = resolve_cfx_track(cfx, &tracks)?;
+        let address = format!(
+            "/track/{track_index}/fx/{}/fxparam/{}/value",
+            cfx.fx,
+            cfx.master_volume_parameter + 1
+        );
+        send_osc_float(&cfx.osc_address, &address, f32::from(cc_value) / 127.0)?;
+        thread::sleep(Duration::from_millis(100));
+        reaper_request(&config.reaper, "40026")?;
+        fs::write(self.cfx_volume_path(), format!("{cc_value}\n"))
+            .context("Failed to save the CFX calibration value")?;
+        Ok(self.public_cfx_snapshot(cfx, true, None))
+    }
+
+    pub fn set_pianoteq_parameter(
+        &self,
+        parameter_id: &str,
+        normalized_value: f32,
+    ) -> Result<ReaperPianoteqSnapshot> {
+        if !normalized_value.is_finite() || !(0.0..=1.0).contains(&normalized_value) {
+            return Err(anyhow!(
+                "Pianoteq VST control value must be between 0 and 1"
+            ));
+        }
+        let parameter_index = pianoteq_parameter_index(parameter_id)
+            .ok_or_else(|| anyhow!("Unsupported Pianoteq VST control"))?;
+        let (vst, track_index) = self.resolve_pianoteq_target()?;
+        let address = format!(
+            "/track/{track_index}/fx/{}/fxparam/{}/value",
+            vst.fx,
+            parameter_index + 1
+        );
+        send_osc_float(&vst.osc_address, &address, normalized_value)?;
+        Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
+    }
+
+    pub fn load_pianoteq_preset(&self, preset_id: &str) -> Result<ReaperPianoteqSnapshot> {
+        let (vst, track_index) = self.resolve_pianoteq_target()?;
+        let preset = vst
+            .presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .ok_or_else(|| anyhow!("Unknown REAPER Pianoteq preset {preset_id:?}"))?;
+        // Bind before loading the preset so no REAPER feedback can race past us.
+        // Failure to open feedback must not turn a successful sound change into
+        // a failed request; the snapshot reports that the displayed values are
+        // not fresh instead.
+        let feedback = open_osc_feedback(&vst.osc_feedback_address);
+        let address = format!("/track/{track_index}/fx/{}/preset", vst.fx);
+        send_osc_string(&vst.osc_address, &address, &preset.reaper_preset)?;
+        // Make the loaded Pianoteq sound audible after the state change was sent.
+        self.activate(&vst.piano_id)?;
+        let mut snapshot = public_pianoteq_snapshot(&self.config_path, vst, true, None);
+        match feedback.and_then(|socket| fetch_pianoteq_parameters(&socket, vst, track_index)) {
+            Ok(parameters) => {
+                snapshot.parameters = parameters;
+                snapshot.parameters_fresh = true;
+            }
+            Err(error) => snapshot.parameter_error = Some(error.to_string()),
+        }
+        Ok(snapshot)
+    }
+
+    pub fn load_pianoteq_reverb(&self, reverb_id: &str) -> Result<ReaperPianoteqSnapshot> {
+        let (vst, track_index) = self.resolve_pianoteq_target()?;
+        let reverb = vst
+            .reverbs
+            .iter()
+            .find(|reverb| reverb.id == reverb_id)
+            .ok_or_else(|| anyhow!("Unknown REAPER Pianoteq reverb {reverb_id:?}"))?;
+        for (parameter, value) in [
+            ("reverb_duration", reverb.duration),
+            ("reverb_mix", reverb.mix),
+            ("room_dimensions", reverb.room_dimensions),
+            ("reverb_switch", 1.0),
+        ] {
+            let parameter_index = pianoteq_parameter_index(parameter)
+                .expect("built-in Pianoteq reverb parameter must be supported");
+            let address = format!(
+                "/track/{track_index}/fx/{}/fxparam/{}/value",
+                vst.fx,
+                parameter_index + 1
+            );
+            send_osc_float(&vst.osc_address, &address, value)?;
+        }
+        Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
+    }
+
+    fn resolve_pianoteq_target(&self) -> Result<(&PianoteqVstConfig, usize)> {
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| anyhow!(error.clone()))?;
+        let vst = config
+            .pianoteq_vst
+            .as_ref()
+            .ok_or_else(|| anyhow!("REAPER Pianoteq VST control is not configured"))?;
+        let tracks = fetch_tracks(&config.reaper)?;
+        let track_index = resolve_vst_track(vst, &tracks)?;
+        Ok((vst, track_index))
+    }
+
     fn unavailable(
         &self,
         pianos: Vec<ReaperPiano>,
@@ -191,6 +479,66 @@ impl ReaperClient {
             error: Some(error),
         }
     }
+
+    fn unavailable_pianoteq(&self, configured: bool, error: String) -> ReaperPianoteqSnapshot {
+        ReaperPianoteqSnapshot {
+            configured,
+            available: false,
+            piano_id: None,
+            track: None,
+            fx: None,
+            presets: Vec::new(),
+            reverbs: Vec::new(),
+            parameters: HashMap::new(),
+            parameters_fresh: false,
+            parameter_error: None,
+            config_path: self.config_path.display().to_string(),
+            error: Some(error),
+        }
+    }
+
+    fn cfx_volume_path(&self) -> PathBuf {
+        self.config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("cfx-master-volume.txt")
+    }
+
+    fn stored_cfx_volume(&self) -> Option<u8> {
+        fs::read_to_string(self.cfx_volume_path())
+            .ok()
+            .and_then(|value| value.trim().parse::<u8>().ok())
+            .filter(|value| *value <= 127)
+    }
+
+    fn public_cfx_snapshot(
+        &self,
+        cfx: &CfxVstConfig,
+        available: bool,
+        error: Option<String>,
+    ) -> ReaperCfxSnapshot {
+        ReaperCfxSnapshot {
+            configured: true,
+            available,
+            track: Some(cfx.track.clone()),
+            fx: Some(cfx.fx),
+            master_volume_cc: self.stored_cfx_volume(),
+            config_path: self.config_path.display().to_string(),
+            error,
+        }
+    }
+
+    fn unavailable_cfx(&self, configured: bool, error: String) -> ReaperCfxSnapshot {
+        ReaperCfxSnapshot {
+            configured,
+            available: false,
+            track: None,
+            fx: None,
+            master_volume_cc: self.stored_cfx_volume(),
+            config_path: self.config_path.display().to_string(),
+            error: Some(error),
+        }
+    }
 }
 
 fn default_address() -> String {
@@ -199,6 +547,22 @@ fn default_address() -> String {
 
 fn default_timeout_ms() -> u64 {
     800
+}
+
+fn default_fx_number() -> usize {
+    1
+}
+
+fn default_cfx_master_parameter() -> usize {
+    7
+}
+
+fn default_osc_address() -> String {
+    DEFAULT_OSC_ADDRESS.to_string()
+}
+
+fn default_osc_feedback_address() -> String {
+    DEFAULT_OSC_FEEDBACK_ADDRESS.to_string()
 }
 
 fn default_config_path() -> PathBuf {
@@ -256,7 +620,419 @@ fn validate_config(config: &ReaperConfig) -> Result<()> {
             }
         }
     }
+    if let Some(vst) = &config.pianoteq_vst {
+        if vst.piano_id.trim().is_empty() || vst.track.trim().is_empty() {
+            return Err(anyhow!(
+                "pianoteq_vst needs non-empty piano_id and track values"
+            ));
+        }
+        if vst.fx == 0 {
+            return Err(anyhow!(
+                "pianoteq_vst.fx is one-based and must be at least 1"
+            ));
+        }
+        vst.osc_address
+            .to_socket_addrs()
+            .with_context(|| format!("Invalid REAPER OSC address {}", vst.osc_address))?
+            .next()
+            .ok_or_else(|| anyhow!("REAPER OSC address did not resolve"))?;
+        vst.osc_feedback_address
+            .to_socket_addrs()
+            .with_context(|| {
+                format!(
+                    "Invalid REAPER OSC feedback address {}",
+                    vst.osc_feedback_address
+                )
+            })?
+            .next()
+            .ok_or_else(|| anyhow!("REAPER OSC feedback address did not resolve"))?;
+        let piano = config
+            .pianos
+            .iter()
+            .find(|piano| piano.id == vst.piano_id)
+            .ok_or_else(|| anyhow!("pianoteq_vst.piano_id must match a configured piano"))?;
+        if !piano
+            .tracks
+            .iter()
+            .any(|track| track.eq_ignore_ascii_case(&vst.track))
+        {
+            return Err(anyhow!(
+                "pianoteq_vst.track must belong to its configured piano"
+            ));
+        }
+        let mut preset_ids = HashSet::new();
+        for preset in &vst.presets {
+            if preset.id.trim().is_empty()
+                || preset.name.trim().is_empty()
+                || preset.reaper_preset.trim().is_empty()
+            {
+                return Err(anyhow!(
+                    "Every pianoteq_vst preset needs non-empty id, name, and reaper_preset"
+                ));
+            }
+            if !preset_ids.insert(preset.id.to_lowercase()) {
+                return Err(anyhow!("Duplicate Pianoteq VST preset id {:?}", preset.id));
+            }
+        }
+        let mut reverb_ids = HashSet::new();
+        for reverb in &vst.reverbs {
+            if reverb.id.trim().is_empty() || reverb.name.trim().is_empty() {
+                return Err(anyhow!(
+                    "Every pianoteq_vst reverb needs a non-empty id and name"
+                ));
+            }
+            if !reverb_ids.insert(reverb.id.to_lowercase()) {
+                return Err(anyhow!("Duplicate Pianoteq VST reverb id {:?}", reverb.id));
+            }
+            for value in [reverb.duration, reverb.mix, reverb.room_dimensions] {
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(anyhow!(
+                        "Pianoteq VST reverb values must be between 0 and 1"
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(cfx) = &config.cfx_vst {
+        if cfx.piano_id.trim().is_empty() || cfx.track.trim().is_empty() {
+            return Err(anyhow!("cfx_vst needs non-empty piano_id and track values"));
+        }
+        if cfx.fx == 0 {
+            return Err(anyhow!("cfx_vst.fx is one-based and must be at least 1"));
+        }
+        cfx.osc_address
+            .to_socket_addrs()
+            .with_context(|| format!("Invalid REAPER OSC address {}", cfx.osc_address))?
+            .next()
+            .ok_or_else(|| anyhow!("REAPER OSC address did not resolve"))?;
+        let piano = config
+            .pianos
+            .iter()
+            .find(|piano| piano.id == cfx.piano_id)
+            .ok_or_else(|| anyhow!("cfx_vst.piano_id must match a configured piano"))?;
+        if !piano
+            .tracks
+            .iter()
+            .any(|track| track.eq_ignore_ascii_case(&cfx.track))
+        {
+            return Err(anyhow!("cfx_vst.track must belong to its configured piano"));
+        }
+    }
     Ok(())
+}
+
+fn public_pianoteq_snapshot(
+    config_path: &Path,
+    vst: &PianoteqVstConfig,
+    available: bool,
+    error: Option<String>,
+) -> ReaperPianoteqSnapshot {
+    ReaperPianoteqSnapshot {
+        configured: true,
+        available,
+        piano_id: Some(vst.piano_id.clone()),
+        track: Some(vst.track.clone()),
+        fx: Some(vst.fx),
+        presets: vst
+            .presets
+            .iter()
+            .map(|preset| ReaperPianoteqPreset {
+                id: preset.id.clone(),
+                name: preset.name.clone(),
+                demo: preset.demo,
+            })
+            .collect(),
+        reverbs: vst
+            .reverbs
+            .iter()
+            .map(|reverb| ReaperPianoteqReverb {
+                id: reverb.id.clone(),
+                name: reverb.name.clone(),
+                duration: reverb.duration,
+                mix: reverb.mix,
+                room_dimensions: reverb.room_dimensions,
+            })
+            .collect(),
+        parameters: HashMap::new(),
+        parameters_fresh: false,
+        parameter_error: None,
+        config_path: config_path.display().to_string(),
+        error,
+    }
+}
+
+fn resolve_vst_track(vst: &PianoteqVstConfig, tracks: &[ReaperTrack]) -> Result<usize> {
+    let matches = tracks
+        .iter()
+        .filter(|track| track.name.eq_ignore_ascii_case(&vst.track))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [track] => Ok(track.index),
+        [] => Err(anyhow!(
+            "REAPER Pianoteq track {:?} was not found",
+            vst.track
+        )),
+        _ => Err(anyhow!(
+            "REAPER Pianoteq track {:?} is ambiguous",
+            vst.track
+        )),
+    }
+}
+
+fn resolve_cfx_track(cfx: &CfxVstConfig, tracks: &[ReaperTrack]) -> Result<usize> {
+    let matches = tracks
+        .iter()
+        .filter(|track| track.name.eq_ignore_ascii_case(&cfx.track))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [track] => Ok(track.index),
+        [] => Err(anyhow!("REAPER CFX track {:?} was not found", cfx.track)),
+        _ => Err(anyhow!("REAPER CFX track {:?} is ambiguous", cfx.track)),
+    }
+}
+
+fn pianoteq_parameter_index(id: &str) -> Option<usize> {
+    match id {
+        "dynamics" => Some(1),
+        "volume" => Some(2),
+        "reverb_switch" => Some(201),
+        "reverb_duration" => Some(202),
+        "reverb_mix" => Some(203),
+        "room_dimensions" => Some(204),
+        _ => None,
+    }
+}
+
+fn send_osc_float(destination: &str, address: &str, value: f32) -> Result<()> {
+    let mut packet = osc_string(address);
+    packet.extend_from_slice(&osc_string(",f"));
+    packet.extend_from_slice(&value.to_bits().to_be_bytes());
+    send_osc(destination, &packet)
+}
+
+fn send_osc_string(destination: &str, address: &str, value: &str) -> Result<()> {
+    let mut packet = osc_string(address);
+    packet.extend_from_slice(&osc_string(",s"));
+    packet.extend_from_slice(&osc_string(value));
+    send_osc(destination, &packet)
+}
+
+fn send_osc_int(destination: &str, address: &str, value: i32) -> Result<()> {
+    let mut packet = osc_string(address);
+    packet.extend_from_slice(&osc_string(",i"));
+    packet.extend_from_slice(&value.to_be_bytes());
+    send_osc(destination, &packet)
+}
+
+fn open_osc_feedback(address: &str) -> Result<UdpSocket> {
+    let address = address
+        .to_socket_addrs()
+        .with_context(|| format!("Invalid REAPER OSC feedback address {address}"))?
+        .next()
+        .ok_or_else(|| anyhow!("REAPER OSC feedback address did not resolve"))?;
+    let socket = UdpSocket::bind(address)
+        .with_context(|| format!("Failed to listen for REAPER OSC feedback on {address}"))?;
+    socket
+        .set_read_timeout(Some(Duration::from_millis(15)))
+        .context("Failed to set the REAPER OSC feedback timeout")?;
+    Ok(socket)
+}
+
+fn fetch_pianoteq_parameters(
+    socket: &UdpSocket,
+    vst: &PianoteqVstConfig,
+    track_index: usize,
+) -> Result<HashMap<String, f32>> {
+    send_osc_int(
+        &vst.osc_address,
+        "/device/track/select",
+        i32::try_from(track_index).context("REAPER track index is too large")?,
+    )?;
+    send_osc_int(
+        &vst.osc_address,
+        "/device/fx/select",
+        i32::try_from(vst.fx).context("REAPER FX index is too large")?,
+    )?;
+
+    let mut parameters = HashMap::new();
+    // The Keyestra surface exposes 16 parameters per bank. Dynamics is in bank
+    // 1; Pianoteq's reverb controls (parameters 202-205 in OSC's one-based
+    // numbering) are in bank 13.
+    for bank in [1_usize, 13] {
+        send_osc_int(&vst.osc_address, "/device/fxparam/bank/select", bank as i32)?;
+        collect_pianoteq_feedback(
+            socket,
+            track_index,
+            vst.fx,
+            bank,
+            Instant::now() + Duration::from_millis(180),
+            &mut parameters,
+        )?;
+    }
+
+    let missing = pianoteq_display_parameters()
+        .iter()
+        .filter_map(|(id, _)| (!parameters.contains_key(*id)).then_some(*id))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "REAPER did not return fresh Pianoteq values for {}. Confirm OSC feedback uses 127.0.0.1:9001 and reload the Keyestra pattern file",
+            missing.join(", ")
+        ));
+    }
+    Ok(parameters)
+}
+
+fn pianoteq_display_parameters() -> [(&'static str, usize); 5] {
+    [
+        ("dynamics", 2),
+        ("reverb_switch", 202),
+        ("reverb_duration", 203),
+        ("reverb_mix", 204),
+        ("room_dimensions", 205),
+    ]
+}
+
+fn collect_pianoteq_feedback(
+    socket: &UdpSocket,
+    track_index: usize,
+    fx: usize,
+    bank: usize,
+    deadline: Instant,
+    parameters: &mut HashMap<String, f32>,
+) -> Result<()> {
+    let mut packet = [0_u8; 4096];
+    while Instant::now() < deadline {
+        match socket.recv_from(&mut packet) {
+            Ok((length, _)) => {
+                parse_osc_packet(&packet[..length], &mut |address, value| {
+                    let Some(number) =
+                        osc_feedback_parameter_number(address, track_index, fx, bank)
+                    else {
+                        return;
+                    };
+                    if let Some((id, _)) = pianoteq_display_parameters()
+                        .iter()
+                        .find(|(_, parameter)| *parameter == number)
+                    {
+                        parameters.insert((*id).to_string(), value.clamp(0.0, 1.0));
+                    }
+                })?;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => return Err(error).context("Failed to receive REAPER OSC feedback"),
+        }
+    }
+    Ok(())
+}
+
+fn osc_feedback_parameter_number(
+    address: &str,
+    track_index: usize,
+    fx: usize,
+    bank: usize,
+) -> Option<usize> {
+    let prefix = format!("/track/{track_index}/fx/{fx}/fxparam/");
+    let absolute_number = address
+        .strip_prefix(&prefix)
+        .and_then(|rest| rest.strip_suffix("/value"))
+        .and_then(|number| number.parse::<usize>().ok());
+    let selected_fx_prefix = format!("/fx/{fx}/fxparam/");
+    let bank_slot = address
+        .strip_prefix(&selected_fx_prefix)
+        .or_else(|| address.strip_prefix("/fxparam/"))
+        .and_then(|rest| rest.strip_suffix("/value"))
+        .and_then(|number| number.parse::<usize>().ok());
+    absolute_number.or_else(|| {
+        bank_slot.map(|slot| {
+            if slot <= 16 {
+                (bank - 1) * 16 + slot
+            } else {
+                slot
+            }
+        })
+    })
+}
+
+fn parse_osc_packet(packet: &[u8], callback: &mut impl FnMut(&str, f32)) -> Result<()> {
+    if packet.starts_with(b"#bundle\0") {
+        if packet.len() < 16 {
+            return Err(anyhow!("REAPER sent an incomplete OSC bundle"));
+        }
+        let mut offset = 16;
+        while offset < packet.len() {
+            if offset + 4 > packet.len() {
+                return Err(anyhow!("REAPER sent an incomplete OSC bundle element"));
+            }
+            let length =
+                u32::from_be_bytes(packet[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            if offset + length > packet.len() {
+                return Err(anyhow!("REAPER sent an invalid OSC bundle element length"));
+            }
+            parse_osc_packet(&packet[offset..offset + length], callback)?;
+            offset += length;
+        }
+        return Ok(());
+    }
+
+    let mut offset = 0;
+    let address = read_osc_string(packet, &mut offset)?;
+    let types = read_osc_string(packet, &mut offset)?;
+    if types == ",f" && offset + 4 <= packet.len() {
+        let value = f32::from_bits(u32::from_be_bytes(
+            packet[offset..offset + 4].try_into().unwrap(),
+        ));
+        if value.is_finite() {
+            callback(address, value);
+        }
+    }
+    Ok(())
+}
+
+fn read_osc_string<'a>(packet: &'a [u8], offset: &mut usize) -> Result<&'a str> {
+    let start = *offset;
+    let end = packet[start..]
+        .iter()
+        .position(|byte| *byte == 0)
+        .map(|length| start + length)
+        .ok_or_else(|| anyhow!("REAPER sent an unterminated OSC string"))?;
+    *offset = (end + 4) & !3;
+    if *offset > packet.len() {
+        return Err(anyhow!("REAPER sent an invalid padded OSC string"));
+    }
+    std::str::from_utf8(&packet[start..end]).context("REAPER sent a non-UTF-8 OSC string")
+}
+
+fn send_osc(destination: &str, packet: &[u8]) -> Result<()> {
+    let address = destination
+        .to_socket_addrs()
+        .with_context(|| format!("Invalid REAPER OSC address {destination}"))?
+        .next()
+        .ok_or_else(|| anyhow!("REAPER OSC address did not resolve"))?;
+    let bind_address = if address.is_ipv6() {
+        "[::]:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let socket = UdpSocket::bind(bind_address).context("Failed to open REAPER OSC socket")?;
+    socket
+        .send_to(packet, address)
+        .with_context(|| format!("Failed to send REAPER OSC to {destination}"))?;
+    Ok(())
+}
+
+fn osc_string(value: &str) -> Vec<u8> {
+    let mut output = value.as_bytes().to_vec();
+    output.push(0);
+    while output.len() % 4 != 0 {
+        output.push(0);
+    }
+    output
 }
 
 fn public_pianos(config: &ReaperConfig) -> Vec<ReaperPiano> {
@@ -354,6 +1130,22 @@ fn parse_tracks(body: &str) -> Result<Vec<ReaperTrack>> {
         return Err(anyhow!("REAPER project has no tracks"));
     }
     Ok(tracks)
+}
+
+fn parse_master_muted(body: &str) -> Result<bool> {
+    for line in body.lines() {
+        let fields = line.trim_end_matches('\r').split('\t').collect::<Vec<_>>();
+        if fields.first() != Some(&"TRACK") || fields.get(1) != Some(&"0") {
+            continue;
+        }
+        let flags = fields
+            .get(3)
+            .ok_or_else(|| anyhow!("REAPER returned an incomplete Master track response"))?
+            .parse::<u32>()
+            .context("REAPER returned invalid Master track flags")?;
+        return Ok(flags & 8 != 0);
+    }
+    Err(anyhow!("REAPER did not return its Master track state"))
 }
 
 fn decode_reaper_string(value: &str) -> String {
@@ -485,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn shipped_config_and_bootstrap_use_the_same_piano_identities() {
+    fn shipped_config_uses_the_two_live_piano_identities() {
         let shipped: ReaperConfig =
             toml::from_str(include_str!("../examples/reaper-pianos.toml")).unwrap();
         validate_config(&shipped).unwrap();
@@ -496,18 +1288,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             identities,
-            vec![
-                ("cfx", "Garritan CFX"),
-                ("sk-ex", "Pianoteq SK-EX"),
-                ("steinway-d", "Pianoteq Steinway D"),
-                ("280vc", "Pianoteq Bösendorfer 280VC"),
-            ]
+            vec![("cfx", "Garritan CFX"), ("pianoteq-live", "Pianoteq Live"),]
         );
 
-        let bootstrap = include_str!("../scripts/reaper/keyestra-piano-compare-bootstrap.lua");
+        let bootstrap = include_str!("../scripts/reaper/keyestra-piano-live-simplify.lua");
         for (id, name) in identities {
-            assert!(bootstrap.contains(&format!("id = \"{id}\"")));
-            assert!(bootstrap.contains(&format!("name = \"{name}\"")));
+            assert!(bootstrap.contains(name));
+            assert!(id == "cfx" || id == "pianoteq-live");
         }
     }
 
@@ -521,6 +1308,13 @@ mod tests {
         assert!(!tracks[0].muted);
         assert_eq!(tracks[1].name, "SK-EX\tClose");
         assert!(tracks[1].muted);
+    }
+
+    #[test]
+    fn parses_reaper_master_mute_flag() {
+        assert!(!parse_master_muted("TRACK\t0\tMASTER\t512\t1\n").unwrap());
+        assert!(parse_master_muted("TRACK\t0\tMASTER\t520\t1\n").unwrap());
+        assert!(parse_master_muted("TRACK\t1\tPiano\t4\t1\n").is_err());
     }
 
     #[test]
@@ -626,6 +1420,120 @@ mod tests {
         assert_eq!(
             base64(b"Aladdin:open sesame"),
             "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+        );
+    }
+
+    #[test]
+    fn osc_packets_are_padded_and_use_network_byte_order() {
+        let listener = UdpSocket::bind("127.0.0.1:0").unwrap();
+        listener
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let destination = listener.local_addr().unwrap().to_string();
+        send_osc_float(&destination, "/track/2/fx/1/fxparam/2/value", 0.5).unwrap();
+
+        let mut packet = [0_u8; 256];
+        let (length, _) = listener.recv_from(&mut packet).unwrap();
+        let expected_address = osc_string("/track/2/fx/1/fxparam/2/value");
+        let expected_type = osc_string(",f");
+        assert_eq!(&packet[..expected_address.len()], expected_address);
+        assert_eq!(
+            &packet[expected_address.len()..expected_address.len() + expected_type.len()],
+            expected_type
+        );
+        assert_eq!(
+            &packet[length - 4..length],
+            &0.5_f32.to_bits().to_be_bytes()
+        );
+    }
+
+    #[test]
+    fn validates_pianoteq_vst_target_and_named_presets() {
+        let config: ReaperConfig = toml::from_str(
+            r#"
+                [pianoteq_vst]
+                piano_id = "live"
+                track = "Pianoteq Live"
+                [[pianoteq_vst.preset]]
+                id = "sk-ex"
+                name = "SK-EX Player"
+                reaper_preset = "SK-EX Player"
+                [[pianoteq_vst.reverb]]
+                id = "studio"
+                name = "Studio"
+                duration = 0.3
+                mix = 0.2
+                room_dimensions = 0.4
+
+                [[piano]]
+                id = "cfx"
+                name = "CFX"
+                tracks = ["CFX"]
+                [[piano]]
+                id = "live"
+                name = "Pianoteq"
+                tracks = ["Pianoteq Live"]
+            "#,
+        )
+        .unwrap();
+        validate_config(&config).unwrap();
+        let vst = config.pianoteq_vst.as_ref().unwrap();
+        assert_eq!(vst.fx, 1);
+        assert_eq!(vst.osc_address, DEFAULT_OSC_ADDRESS);
+        assert_eq!(vst.osc_feedback_address, DEFAULT_OSC_FEEDBACK_ADDRESS);
+        assert_eq!(vst.reverbs.len(), 1);
+        assert_eq!(pianoteq_parameter_index("dynamics"), Some(1));
+        assert_eq!(pianoteq_parameter_index("not-a-control"), None);
+    }
+
+    #[test]
+    fn parses_reaper_osc_parameter_feedback_messages_and_bundles() {
+        let address = osc_string("/track/2/fx/1/fxparam/203/value");
+        let types = osc_string(",f");
+        let mut message = address;
+        message.extend_from_slice(&types);
+        message.extend_from_slice(&0.375_f32.to_bits().to_be_bytes());
+
+        let mut values = Vec::new();
+        parse_osc_packet(&message, &mut |address, value| {
+            values.push((address.to_string(), value));
+        })
+        .unwrap();
+        assert_eq!(
+            values,
+            vec![("/track/2/fx/1/fxparam/203/value".to_string(), 0.375)]
+        );
+
+        let mut bundle = b"#bundle\0".to_vec();
+        bundle.extend_from_slice(&[0_u8; 8]);
+        bundle.extend_from_slice(&(message.len() as u32).to_be_bytes());
+        bundle.extend_from_slice(&message);
+        values.clear();
+        parse_osc_packet(&bundle, &mut |address, value| {
+            values.push((address.to_string(), value));
+        })
+        .unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].1, 0.375);
+    }
+
+    #[test]
+    fn maps_absolute_and_banked_reaper_osc_parameter_addresses() {
+        assert_eq!(
+            osc_feedback_parameter_number("/track/2/fx/1/fxparam/203/value", 2, 1, 13),
+            Some(203)
+        );
+        assert_eq!(
+            osc_feedback_parameter_number("/fx/1/fxparam/11/value", 2, 1, 13),
+            Some(203)
+        );
+        assert_eq!(
+            osc_feedback_parameter_number("/fxparam/12/value", 2, 1, 13),
+            Some(204)
+        );
+        assert_eq!(
+            osc_feedback_parameter_number("/track/3/fx/1/fxparam/203/value", 2, 1, 13),
+            None
         );
     }
 
