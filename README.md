@@ -202,7 +202,7 @@ state and starts mapping when the devices return.
 The default Tray settings are:
 
 ```text
-input:   Roland Digital Piano
+input:   Clavinova
 output:  Keyestra MIDI
 curve:   examples/curve.toml
 monitor: http://localhost:8770
@@ -283,7 +283,7 @@ The default curve is [`examples/curve.toml`](examples/curve.toml):
 
 ```toml
 [input]
-name = "Roland Digital Piano"
+name = "Clavinova"
 
 [output]
 name = "Keyestra MIDI"

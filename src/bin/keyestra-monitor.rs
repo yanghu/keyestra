@@ -1794,6 +1794,23 @@ mod tests {
     }
 
     #[test]
+    fn piano_remote_uses_progressive_disclosure() {
+        let html = render_index_html();
+        assert!(html.contains("id=\"pianoteqFavorites\" open hidden"));
+        assert!(html.contains("id=\"pianoteqSound\" open hidden"));
+        assert!(html.contains("id=\"pianoteqReverbs\" hidden"));
+        assert!(html.contains("id=\"pianoteqExplore\" hidden"));
+        assert!(html.contains("id=\"pianoteqPresets\""));
+        assert!(html.contains("id=\"pianoteqCurrentBank\""));
+        assert!(html.contains("id=\"pianoteqCurrentReverbName\""));
+        assert!(html.contains("id=\"pianoteqReverbQuickHint\""));
+        assert!(!html.contains("data-pianoteq-view"));
+        assert!(!html.contains("id=\"pianoteqAllPresets\""));
+        assert!(MONITOR_JS.contains("pianoteq-favorite-source"));
+        assert!(MONITOR_JS.contains("replace(/^My\\s+/i"));
+    }
+
+    #[test]
     fn service_worker_is_build_specific_and_claims_clients() {
         let worker = render_service_worker();
         assert!(!worker.contains(BUILD_ID_TOKEN));

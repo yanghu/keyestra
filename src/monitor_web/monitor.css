@@ -18,45 +18,57 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pianoteq-heading h2 { margin-top:3px; font-size:24px; }
 .pianoteq-eyebrow { color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.14em; }
-.pianoteq-refresh { min-height:36px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 12px; font:inherit; font-weight:850; cursor:pointer; }
-.pianoteq-current { display:grid; gap:4px; margin-top:16px; padding:16px; border-radius:10px; background:var(--accent); color:#fff; }
+.pianoteq-refresh { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 12px; font:inherit; font-weight:850; cursor:pointer; }
+.pianoteq-current { display:grid; gap:3px; margin-top:12px; padding:13px 14px; border-radius:10px; background:var(--accent); color:#fff; }
 .pianoteq-current span,.pianoteq-current small { color:rgba(255,255,255,.76); font-size:12px; font-weight:700; }
-.pianoteq-current strong { font-size:clamp(22px,5vw,34px); line-height:1.12; }
-.pianoteq-view-mode { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:12px; padding:4px; border:1px solid var(--line); border-radius:9px; background:#eef2ee; }
-.pianoteq-view-mode button { min-height:36px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
-.pianoteq-view-mode button.active { background:#fff; color:var(--accent); box-shadow:0 1px 4px rgba(24,32,29,.1); }
-.pianoteq-sound,.pianoteq-instruments { margin-top:16px; }
+.pianoteq-current strong { font-size:clamp(19px,4.2vw,28px); line-height:1.16; }
+.pianoteq-current-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:3px; }
+.pianoteq-current-meta b { color:#fff; font:inherit; }
+.pianoteq-current-meta .pianoteq-current-bank { border-radius:999px; background:rgba(255,255,255,.16); padding:3px 7px; color:#fff; }
+.pianoteq-favorites,.pianoteq-sound,.pianoteq-save,.pianoteq-reverbs,.pianoteq-explore,.pianoteq-presets { margin-top:10px; border:1px solid var(--line); border-radius:10px; background:#fbfcfa; }
+.pianoteq-favorites > summary,.pianoteq-sound > summary,.pianoteq-reverbs > summary,.pianoteq-explore > summary,.pianoteq-presets > summary { min-height:48px; display:flex; align-items:center; gap:9px; padding:7px 12px; color:var(--accent); cursor:pointer; list-style:none; }
+.pianoteq-favorites > summary::-webkit-details-marker,.pianoteq-sound > summary::-webkit-details-marker,.pianoteq-reverbs > summary::-webkit-details-marker,.pianoteq-explore > summary::-webkit-details-marker,.pianoteq-presets > summary::-webkit-details-marker { display:none; }
+.pianoteq-favorites > summary::after,.pianoteq-sound > summary::after,.pianoteq-reverbs > summary::after,.pianoteq-explore > summary::after,.pianoteq-presets > summary::after { content:"⌄"; flex:0 0 auto; margin-left:auto; color:var(--muted); font-size:18px; line-height:1; transform:rotate(-90deg); }
+.pianoteq-favorites[open] > summary::after,.pianoteq-sound[open] > summary::after,.pianoteq-reverbs[open] > summary::after,.pianoteq-explore[open] > summary::after,.pianoteq-presets[open] > summary::after { transform:none; }
+.pianoteq-favorites > summary > span,.pianoteq-sound > summary > span,.pianoteq-reverbs > summary > span,.pianoteq-explore > summary > span,.pianoteq-presets > summary > span { display:grid; min-width:0; gap:2px; }
+.pianoteq-favorites > summary strong,.pianoteq-sound > summary strong,.pianoteq-reverbs > summary strong,.pianoteq-explore > summary strong,.pianoteq-presets > summary strong { overflow:hidden; font-size:13px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.pianoteq-sound > summary small,.pianoteq-reverbs > summary small,.pianoteq-explore > summary small,.pianoteq-presets > summary small { overflow:hidden; color:var(--muted); font-size:10px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+.pianoteq-favorites > summary small { min-width:24px; margin-left:auto; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--muted); font-size:10px; text-align:center; }
+.pianoteq-favorites > summary > span { font-size:13px; font-weight:850; }
+.pianoteq-instruments { padding:0 10px 10px; }
 .pianoteq-section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
 .pianoteq-section-head h3 { margin:0; font-size:14px; }
 .pianoteq-section-head span { display:block; margin-top:2px; color:var(--muted); font-size:11px; font-weight:700; }
-.pianoteq-section-head button { min-height:34px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
-.pianoteq-section-head .pianoteq-reverb-toggle.active { border-color:var(--accent); background:var(--accent); color:#fff; }
-.pianoteq-control-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:7px; }
+.pianoteq-section-head button { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-sound-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 10px 8px; color:var(--muted); font-size:11px; font-weight:850; }
+.pianoteq-reverb-toggle { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0 11px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-reverb-toggle.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.pianoteq-control-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:7px; padding:0 10px 10px; }
 .pianoteq-control { min-width:0; padding:9px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
 .pianoteq-control > span { display:block; margin-bottom:7px; color:var(--muted); font-size:11px; font-weight:850; }
-.pianoteq-control > div { display:grid; grid-template-columns:38px minmax(42px,1fr) 38px; align-items:center; gap:4px; }
-.pianoteq-control button { width:38px; height:38px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0; font:inherit; font-size:21px; font-weight:800; cursor:pointer; }
+.pianoteq-control > div { display:grid; grid-template-columns:44px minmax(42px,1fr) 44px; align-items:center; gap:4px; }
+.pianoteq-control button { width:44px; height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); padding:0; font:inherit; font-size:21px; font-weight:800; cursor:pointer; }
 .pianoteq-control strong { overflow:hidden; font-size:13px; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
 .pianoteq-control button:disabled { opacity:.4; cursor:wait; }
 .pianoteq-reverb-quick strong { min-width:0; font-size:12px; }
-.pianoteq-save { margin-top:10px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
-.pianoteq-save summary { min-height:40px; display:flex; align-items:center; padding:0 10px; color:var(--accent); font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-reverb-quick > small { display:block; margin-top:6px; color:var(--muted); font-size:10px; font-weight:700; text-align:center; }
+.pianoteq-save summary { min-height:44px; display:flex; align-items:center; padding:0 10px; color:var(--accent); font-size:12px; font-weight:850; cursor:pointer; }
 .pianoteq-save-body { display:grid; gap:8px; padding:0 9px 10px; }
-.pianoteq-save-body > button,.pianoteq-save-body form button { min-height:40px; border:1px solid var(--accent); border-radius:8px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
+.pianoteq-save-body > button,.pianoteq-save-body form button { min-height:44px; border:1px solid var(--accent); border-radius:8px; background:#fff; color:var(--accent); padding:0 10px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }
 .pianoteq-save-body > button:disabled,.pianoteq-save-body form button:disabled { opacity:.42; cursor:not-allowed; }
 .pianoteq-save-body form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; }
-.pianoteq-save-body input { min-width:0; height:40px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); padding:0 10px; font:inherit; font-size:13px; }
+.pianoteq-save-body input { min-width:0; height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); padding:0 10px; font:inherit; font-size:13px; }
 .pianoteq-save-body small { color:var(--muted); font-size:11px; line-height:1.4; }
-.pianoteq-favorites,.pianoteq-reverbs { margin-top:16px; }
-.pianoteq-favorites > summary { min-height:40px; display:flex; align-items:center; gap:7px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; padding:0 10px; color:var(--accent); font-size:13px; font-weight:850; cursor:pointer; }
-.pianoteq-favorites > summary small { min-width:22px; margin-left:auto; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--muted); font-size:10px; text-align:center; }
-.pianoteq-favorites[open] > summary { margin-bottom:8px; }
-.pianoteq-favorites > div,.pianoteq-reverb-favorites { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+.pianoteq-favorites > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; padding:0 10px 10px; }
+.pianoteq-reverb-favorites { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; padding:0 10px 10px; }
 .pianoteq-favorites button,.pianoteq-reverb-favorites button { min-height:48px; border:1px solid var(--accent); border-radius:9px; background:#fff; color:var(--accent); padding:8px; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.pianoteq-favorites [data-pianoteq-load].active { background:var(--accent); color:#fff; }
+.pianoteq-favorite-load { display:flex; min-width:0; align-items:center; gap:7px; overflow:hidden; text-align:left; }
+.pianoteq-favorite-source { flex:0 0 auto; border-radius:999px; background:var(--soft); padding:2px 6px; color:var(--accent); font-size:10px; font-weight:900; line-height:1.4; }
+.pianoteq-favorite-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pianoteq-favorite-load.active .pianoteq-favorite-source { background:rgba(255,255,255,.18); color:#fff; }
 .pianoteq-reverb-favorites [data-pianoteq-reverb].active { background:var(--accent); color:#fff; }
-.pianoteq-reverb-all { margin-top:8px; }
-.pianoteq-reverb-all summary { min-height:36px; display:flex; align-items:center; color:var(--accent); font-size:12px; font-weight:850; cursor:pointer; }
-.pianoteq-reverb-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.pianoteq-reverb-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; padding:0 10px 10px; }
 .pianoteq-reverb-load { overflow:hidden; padding:8px 11px; font-size:13px; font-weight:800; text-align:left; text-overflow:ellipsis; white-space:nowrap; }
 .pianoteq-reverb-load.active { border-color:var(--accent); background:var(--soft); color:var(--accent); }
 .pianoteq-instrument-search { width:100%; height:42px; margin-bottom:8px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 11px; font:inherit; font-size:14px; }
@@ -74,9 +86,10 @@ main.piano-mode > .pianoteq-view { display:block; }
 .pianoteq-access.purchased { background:var(--accent); color:#fff; }
 .pianoteq-access.free { background:#fff0c7; color:#8a5700; }
 .pianoteq-access.demo { background:#edf0ed; color:#7b847f; }
-.pianoteq-search { display:grid; gap:5px; margin-top:16px; color:var(--muted); font-size:11px; font-weight:850; }
+.pianoteq-presets { margin:0 0 10px; background:#fff; }
+.pianoteq-search { display:grid; gap:5px; margin:0; padding:0 10px; color:var(--muted); font-size:11px; font-weight:850; }
 .pianoteq-search input { width:100%; height:44px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:0 12px; font:inherit; font-size:15px; }
-.pianoteq-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:52vh; margin-top:10px; overflow:auto; }
+.pianoteq-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:52vh; margin-top:10px; padding:0 10px 10px; overflow:auto; }
 .pianoteq-row { display:grid; grid-template-columns:44px minmax(0,1fr); gap:6px; }
 .pianoteq-row button { min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); font:inherit; cursor:pointer; }
 .pianoteq-row .pianoteq-star { color:#a4ada7; font-size:22px; }
@@ -262,11 +275,12 @@ table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:
   .pianoteq-panel { padding:12px; box-shadow:none; }
   .pianoteq-heading h2 { font-size:20px; }
   .pianoteq-current { margin-top:12px; padding:13px; }
-  .pianoteq-list { max-height:none; }
+  .pianoteq-list { grid-template-columns:1fr; max-height:none; }
   .pianoteq-reverb-list { grid-template-columns:1fr; }
   .pianoteq-control-grid { grid-template-columns:1fr; }
   .pianoteq-control { display:grid; grid-template-columns:minmax(72px,.65fr) 1.35fr; align-items:center; gap:8px; }
   .pianoteq-control > span { margin:0; }
+  .pianoteq-reverb-quick > small { grid-column:1/-1; margin-top:0; text-align:right; }
   .pianoteq-save-body form { grid-template-columns:1fr; }
   .pianoteq-instrument-list { grid-template-columns:1fr; }
   header { display:none; }

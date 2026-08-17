@@ -1,5 +1,5 @@
 [input]
-name = "Roland Digital Piano"
+name = "Clavinova"
 
 [output]
 name = "Keyestra MIDI"

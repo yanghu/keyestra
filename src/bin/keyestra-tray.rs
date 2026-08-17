@@ -35,7 +35,7 @@ const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
 #[command(name = "keyestra-tray")]
 #[command(about = "Windows tray companion for Keyestra")]
 struct Cli {
-    #[arg(long = "in", default_value = "Roland Digital Piano")]
+    #[arg(long = "in", default_value = "Clavinova")]
     input: String,
 
     #[arg(long = "out", default_value = "Keyestra MIDI")]
@@ -1108,7 +1108,7 @@ mod tests {
     fn selector_accepts_index_or_case_insensitive_substring() {
         let names = vec![
             Some("Keyestra MIDI".to_string()),
-            Some("Roland Digital Piano".to_string()),
+            Some("Clavinova".to_string()),
         ];
 
         assert!(selector_available("0", &names));
