@@ -230,6 +230,8 @@ fx = 1
 osc_address = "127.0.0.1:9000"
 # Optional; this is the default and must match the OSC surface's device port.
 osc_feedback_address = "127.0.0.1:9001"
+# Optional normalized override applied after every named instrument preset.
+dynamics_after_preset = 0.45
 ```
 
 The phone exposes Dynamics, Reverb on/off, Reverb Duration, Reverb Mix, and
@@ -238,6 +240,13 @@ After a named instrument preset is selected, Keyestra briefly listens for OSC
 feedback and asks REAPER for the two parameter banks containing these controls.
 The sliders are updated only when a complete fresh snapshot arrives; Keyestra
 does not continuously poll plug-in parameters.
+
+`dynamics_after_preset` is the initial value for a reversible practice overlay.
+The separate **Practice Dynamics** slider saves the user's latest value in the
+server-side `%APPDATA%\keyestra\user-settings.json`; it is shared by every
+phone. Keyestra loads the complete REAPER host preset first and then applies
+the saved Dynamics value. It does not rewrite REAPER's encoded user-preset
+file, and selecting the preset directly in REAPER still uses its stored value.
 
 ### Add named sound slots
 

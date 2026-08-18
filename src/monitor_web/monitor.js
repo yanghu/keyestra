@@ -119,6 +119,11 @@ function renderReaperVst(data={}){
   ).join("");
   document.querySelectorAll("[data-reaper-vst-control] input").forEach(input=>input.disabled=!reaperVstState.available||reaperVstState.busy);
   $("reaperVstReverb").disabled=!reaperVstState.available||reaperVstState.busy;
+  if(Number.isFinite(Number(data.practiceDynamics))){
+    const input=document.querySelector('[data-reaper-vst-control="dynamics"] input');
+    input.value=String(data.practiceDynamics);
+    input.dispatchEvent(new Event("input"));
+  }
 }
 function applyFreshReaperVstParameters(data={}){
   if(!data.parametersFresh || !data.parameters) return false;
@@ -128,7 +133,7 @@ function applyFreshReaperVstParameters(data={}){
     if(input && Number.isFinite(Number(value))){
       input.value=String(value);
       input.dispatchEvent(new Event("input"));
-      saveReaperVstControl(parameter,value);
+      if(parameter!=="dynamics") saveReaperVstControl(parameter,value);
     }
   }
   const reverbOn=Number(data.parameters.reverb_switch)>=0.5;
@@ -180,6 +185,20 @@ async function setReaperVstParameter(parameter,value){
     if(!response.ok) throw new Error(data.error || "Pianoteq 参数发送失败");
     $("reaperVstStatus").textContent="已发送到 REAPER；移动插件控件可核对结果。";
   }catch(error){ $("reaperVstStatus").textContent=error.message || "Pianoteq 参数发送失败"; }
+  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
+}
+async function setReaperPracticeDynamics(value){
+  if(reaperVstState.busy || !reaperVstState.available) return;
+  reaperVstState.busy=true; renderReaperVst(reaperVstState);
+  $("reaperVstStatus").textContent="正在保存练习 Dynamics 到这台电脑…";
+  const params=new URLSearchParams({action:"practice-dynamics",value:Number(value).toFixed(4)});
+  try{
+    const response=await fetch(`/reaper-pianoteq?${params}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "Dynamics 保存失败");
+    renderReaperVst(data);
+    $("reaperVstStatus").textContent=`练习 Dynamics 已保存为 ${Math.round(Number(data.practiceDynamics)*100)}%；换 Preset 后仍保持此值。`;
+  }catch(error){ $("reaperVstStatus").textContent=error.message || "Dynamics 保存失败"; }
   finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
 }
 async function loadReaperVstPreset(id){
@@ -246,7 +265,7 @@ function restoreReaperVstControls(){
   document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
     const input=control.querySelector("input");
     const value=Number(saved[control.dataset.reaperVstControl]);
-    if(Number.isFinite(value)) input.value=String(value);
+    if(control.dataset.reaperVstControl!=="dynamics" && Number.isFinite(value)) input.value=String(value);
     control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`;
   });
   try { reaperVstState.activeReverbId=localStorage.getItem("keyestra-reaper-vst-reverb"); } catch(error) {}
@@ -650,8 +669,9 @@ document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
   const input=control.querySelector("input");
   input.addEventListener("input",()=>{ control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`; });
   input.addEventListener("change",()=>{
-    saveReaperVstControl(control.dataset.reaperVstControl,input.value);
-    setReaperVstParameter(control.dataset.reaperVstControl,input.value);
+    const parameter=control.dataset.reaperVstControl;
+    if(parameter==="dynamics") setReaperPracticeDynamics(input.value);
+    else { saveReaperVstControl(parameter,input.value); setReaperVstParameter(parameter,input.value); }
   });
 });
 $("reaperVstReverb").addEventListener("click",()=>{

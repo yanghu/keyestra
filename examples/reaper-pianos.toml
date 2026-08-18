@@ -24,6 +24,9 @@ osc_address = "127.0.0.1:9000"
 # Must match the OSC surface's device port. Keyestra listens only while fetching
 # fresh control values after a named preset is selected.
 osc_feedback_address = "127.0.0.1:9001"
+# Practice-oriented overlay applied after every named instrument preset. The
+# stored REAPER host presets remain unchanged and reversible.
+dynamics_after_preset = 0.45
 
 [[pianoteq_vst.preset]]
 id = "sk-ex-player"

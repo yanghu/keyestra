@@ -45,6 +45,11 @@ use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
 const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
 const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
+const LOCAL_CONTROL_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(100),
+    Duration::from_millis(300),
+    Duration::from_millis(700),
+];
 
 #[derive(Debug, Parser)]
 #[command(name = "keyestra-monitor")]
@@ -79,6 +84,13 @@ struct Cli {
         help = "Physical piano MIDI output used for Local Control"
     )]
     piano_output: String,
+
+    #[arg(
+        long = "local-control-command",
+        hide = true,
+        value_parser = ["on", "off"]
+    )]
+    local_control_command: Option<String>,
 
     #[arg(
         long,
@@ -217,6 +229,45 @@ fn local_control_message(enabled: bool) -> [u8; 3] {
 }
 
 fn send_local_control(output_selector: &str, enabled: bool) -> Result<()> {
+    match send_local_control_in_process(output_selector, enabled) {
+        Ok(()) => Ok(()),
+        Err(in_process_error) => {
+            eprintln!(
+                "Local Control in-process recovery failed on {output_selector}; trying an isolated helper process: {in_process_error:#}"
+            );
+            send_local_control_in_helper(output_selector, enabled).map_err(|helper_error| {
+                anyhow::anyhow!(
+                    "Failed to recover MIDI output {output_selector}. In-process attempts: {in_process_error:#}. Isolated helper: {helper_error:#}"
+                )
+            })?;
+            eprintln!(
+                "Recovered Local Control on {output_selector} with an isolated helper process"
+            );
+            Ok(())
+        }
+    }
+}
+
+fn send_local_control_in_process(output_selector: &str, enabled: bool) -> Result<()> {
+    let (result, attempts) = retry_with_delays(&LOCAL_CONTROL_RETRY_DELAYS, || {
+        send_local_control_once(output_selector, enabled)
+    });
+    match result {
+        Ok(()) => {
+            if attempts > 1 {
+                eprintln!(
+                    "Recovered Local Control on {output_selector} after {attempts} in-process attempts"
+                );
+            }
+            Ok(())
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "Failed after {attempts} attempts: {error:#}"
+        )),
+    }
+}
+
+fn send_local_control_once(output_selector: &str, enabled: bool) -> Result<()> {
     let midi_output = MidiOutput::new("keyestra-local-control")?;
     let ports = midi_output.ports();
     let wanted = output_selector.to_lowercase();
@@ -248,6 +299,49 @@ fn send_local_control(output_selector: &str, enabled: bool) -> Result<()> {
         .send(&local_control_message(enabled))
         .with_context(|| format!("Failed to set Local Control on {}", port_name))?;
     Ok(())
+}
+
+fn retry_with_delays<T>(
+    delays: &[Duration],
+    mut operation: impl FnMut() -> Result<T>,
+) -> (Result<T>, usize) {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match operation() {
+            Ok(value) => return (Ok(value), attempts),
+            Err(error) if attempts <= delays.len() => thread::sleep(delays[attempts - 1]),
+            Err(error) => return (Err(error), attempts),
+        }
+    }
+}
+
+fn send_local_control_in_helper(output_selector: &str, enabled: bool) -> Result<()> {
+    let executable = env::current_exe().context("Failed to locate the running Monitor binary")?;
+    let output = std::process::Command::new(executable)
+        .arg("--piano-out")
+        .arg(output_selector)
+        .arg("--local-control-command")
+        .arg(if enabled { "on" } else { "off" })
+        .output()
+        .context("Failed to start the isolated Local Control helper")?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr);
+    let detail = detail.trim();
+    if detail.is_empty() {
+        Err(anyhow::anyhow!(
+            "Local Control helper exited with {}",
+            output.status
+        ))
+    } else {
+        Err(anyhow::anyhow!(
+            "Local Control helper exited with {}: {detail}",
+            output.status
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -426,6 +520,9 @@ impl MonitorState {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(command) = &cli.local_control_command {
+        return send_local_control_in_process(&cli.piano_output, command == "on");
+    }
     if cli.list {
         list_inputs()?;
         return Ok(());
@@ -878,6 +975,12 @@ fn handle_client(
                             .ok_or_else(|| anyhow::anyhow!("Missing or invalid parameter value"));
                         value.and_then(|value| reaper.set_pianoteq_parameter(&parameter, value))
                     }
+                    Some("practice-dynamics") => {
+                        let value = query_value(query, "value")
+                            .and_then(|value| value.parse::<f32>().ok())
+                            .ok_or_else(|| anyhow::anyhow!("Missing or invalid Dynamics value"));
+                        value.and_then(|value| reaper.set_practice_dynamics(value))
+                    }
                     Some("preset") => {
                         let preset = query_value(query, "id").unwrap_or_default();
                         reaper.load_pianoteq_preset(&preset)
@@ -887,7 +990,7 @@ fn handle_client(
                         reaper.load_pianoteq_reverb(&reverb_id)
                     }
                     _ => Err(anyhow::anyhow!(
-                        "action must be parameter, preset, or reverb"
+                        "action must be parameter, practice-dynamics, preset, or reverb"
                     )),
                 }
                 .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
@@ -2121,6 +2224,35 @@ mod tests {
     fn clavinova_local_control_uses_the_documented_channel_mode_message() {
         assert_eq!(local_control_message(false), [0xB0, 0x7A, 0x00]);
         assert_eq!(local_control_message(true), [0xB0, 0x7A, 0x7F]);
+    }
+
+    #[test]
+    fn local_control_retry_recreates_the_operation_until_it_recovers() {
+        let mut calls = 0;
+        let (result, attempts) =
+            retry_with_delays(&[Duration::ZERO, Duration::ZERO, Duration::ZERO], || {
+                calls += 1;
+                if calls < 3 {
+                    Err(anyhow::anyhow!("temporary MIDI failure"))
+                } else {
+                    Ok("sent")
+                }
+            });
+
+        assert_eq!(result.unwrap(), "sent");
+        assert_eq!(attempts, 3);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn local_control_retry_returns_the_last_error_after_all_attempts() {
+        let (result, attempts) =
+            retry_with_delays(&[Duration::ZERO, Duration::ZERO], || -> Result<()> {
+                Err(anyhow::anyhow!("still unavailable"))
+            });
+
+        assert_eq!(attempts, 3);
+        assert_eq!(result.unwrap_err().to_string(), "still unavailable");
     }
 
     #[test]

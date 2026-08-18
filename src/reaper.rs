@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -67,10 +68,18 @@ struct PianoteqVstConfig {
     osc_address: String,
     #[serde(default = "default_osc_feedback_address")]
     osc_feedback_address: String,
+    #[serde(default)]
+    dynamics_after_preset: Option<f32>,
     #[serde(default, rename = "preset")]
     presets: Vec<PianoteqVstPresetConfig>,
     #[serde(default, rename = "reverb")]
     reverbs: Vec<PianoteqVstReverbConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReaperUserSettings {
+    pianoteq_dynamics: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -156,6 +165,7 @@ pub struct ReaperPianoteqSnapshot {
     pub parameters: HashMap<String, f32>,
     pub parameters_fresh: bool,
     pub parameter_error: Option<String>,
+    pub practice_dynamics: Option<f32>,
     pub config_path: String,
     pub error: Option<String>,
 }
@@ -176,6 +186,8 @@ pub struct ReaperCfxSnapshot {
 pub struct ReaperClient {
     config_path: PathBuf,
     config: std::result::Result<ReaperConfig, String>,
+    settings_path: PathBuf,
+    settings: Arc<Mutex<ReaperUserSettings>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -189,9 +201,28 @@ impl ReaperClient {
     pub fn discover(explicit_path: Option<PathBuf>) -> Self {
         let config_path = explicit_path.unwrap_or_else(default_config_path);
         let config = load_config(&config_path).map_err(|error| error.to_string());
+        let default_dynamics = config
+            .as_ref()
+            .ok()
+            .and_then(|config| config.pianoteq_vst.as_ref())
+            .and_then(|vst| vst.dynamics_after_preset)
+            .unwrap_or(0.45);
+        let settings_path = config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("user-settings.json");
+        let settings = fs::read_to_string(&settings_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<ReaperUserSettings>(&text).ok())
+            .filter(|settings| valid_normalized_value(settings.pianoteq_dynamics))
+            .unwrap_or(ReaperUserSettings {
+                pianoteq_dynamics: default_dynamics,
+            });
         Self {
             config_path,
             config,
+            settings_path,
+            settings: Arc::new(Mutex::new(settings)),
         }
     }
 
@@ -324,12 +355,14 @@ impl ReaperClient {
                 )
             }
         };
-        match fetch_tracks(&config.reaper).and_then(|tracks| resolve_vst_track(vst, &tracks)) {
-            Ok(_) => public_pianoteq_snapshot(&self.config_path, vst, true, None),
-            Err(error) => {
-                public_pianoteq_snapshot(&self.config_path, vst, false, Some(error.to_string()))
-            }
-        }
+        let snapshot =
+            match fetch_tracks(&config.reaper).and_then(|tracks| resolve_vst_track(vst, &tracks)) {
+                Ok(_) => public_pianoteq_snapshot(&self.config_path, vst, true, None),
+                Err(error) => {
+                    public_pianoteq_snapshot(&self.config_path, vst, false, Some(error.to_string()))
+                }
+            };
+        self.with_practice_dynamics(snapshot)
     }
 
     pub fn cfx_snapshot(&self) -> ReaperCfxSnapshot {
@@ -395,7 +428,41 @@ impl ReaperClient {
             parameter_index + 1
         );
         send_osc_float(&vst.osc_address, &address, normalized_value)?;
-        Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
+        Ok(self.with_practice_dynamics(public_pianoteq_snapshot(
+            &self.config_path,
+            vst,
+            true,
+            None,
+        )))
+    }
+
+    pub fn set_practice_dynamics(&self, normalized_value: f32) -> Result<ReaperPianoteqSnapshot> {
+        if !valid_normalized_value(normalized_value) {
+            return Err(anyhow!("Practice Dynamics must be between 0 and 1"));
+        }
+        let (vst, track_index) = self.resolve_pianoteq_target()?;
+        let parameter = pianoteq_parameter_index("dynamics")
+            .expect("built-in Pianoteq Dynamics parameter must be supported");
+        let address = format!(
+            "/track/{track_index}/fx/{}/fxparam/{}/value",
+            vst.fx,
+            parameter + 1
+        );
+        send_osc_float(&vst.osc_address, &address, normalized_value)?;
+        {
+            let mut settings = self
+                .settings
+                .lock()
+                .map_err(|_| anyhow!("REAPER user settings lock poisoned"))?;
+            settings.pianoteq_dynamics = normalized_value;
+            self.persist_user_settings(&settings)?;
+        }
+        Ok(self.with_practice_dynamics(public_pianoteq_snapshot(
+            &self.config_path,
+            vst,
+            true,
+            None,
+        )))
     }
 
     pub fn load_pianoteq_preset(&self, preset_id: &str) -> Result<ReaperPianoteqSnapshot> {
@@ -414,6 +481,15 @@ impl ReaperClient {
         send_osc_string(&vst.osc_address, &address, &preset.reaper_preset)?;
         // Make the loaded Pianoteq sound audible after the state change was sent.
         self.activate(&vst.piano_id)?;
+        let dynamics = self.practice_dynamics()?;
+        let parameter = pianoteq_parameter_index("dynamics")
+            .expect("built-in Pianoteq Dynamics parameter must be supported");
+        let address = format!(
+            "/track/{track_index}/fx/{}/fxparam/{}/value",
+            vst.fx,
+            parameter + 1
+        );
+        send_osc_float(&vst.osc_address, &address, dynamics)?;
         let mut snapshot = public_pianoteq_snapshot(&self.config_path, vst, true, None);
         match feedback.and_then(|socket| fetch_pianoteq_parameters(&socket, vst, track_index)) {
             Ok(parameters) => {
@@ -422,7 +498,7 @@ impl ReaperClient {
             }
             Err(error) => snapshot.parameter_error = Some(error.to_string()),
         }
-        Ok(snapshot)
+        Ok(self.with_practice_dynamics(snapshot))
     }
 
     pub fn load_pianoteq_reverb(&self, reverb_id: &str) -> Result<ReaperPianoteqSnapshot> {
@@ -447,7 +523,12 @@ impl ReaperClient {
             );
             send_osc_float(&vst.osc_address, &address, value)?;
         }
-        Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
+        Ok(self.with_practice_dynamics(public_pianoteq_snapshot(
+            &self.config_path,
+            vst,
+            true,
+            None,
+        )))
     }
 
     fn resolve_pianoteq_target(&self) -> Result<(&PianoteqVstConfig, usize)> {
@@ -462,6 +543,39 @@ impl ReaperClient {
         let tracks = fetch_tracks(&config.reaper)?;
         let track_index = resolve_vst_track(vst, &tracks)?;
         Ok((vst, track_index))
+    }
+
+    fn practice_dynamics(&self) -> Result<f32> {
+        self.settings
+            .lock()
+            .map(|settings| settings.pianoteq_dynamics)
+            .map_err(|_| anyhow!("REAPER user settings lock poisoned"))
+    }
+
+    fn with_practice_dynamics(
+        &self,
+        mut snapshot: ReaperPianoteqSnapshot,
+    ) -> ReaperPianoteqSnapshot {
+        snapshot.practice_dynamics = self.practice_dynamics().ok();
+        snapshot
+    }
+
+    fn persist_user_settings(&self, settings: &ReaperUserSettings) -> Result<()> {
+        if let Some(parent) = self.settings_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create REAPER user settings directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        let text = serde_json::to_string_pretty(settings)?;
+        fs::write(&self.settings_path, format!("{text}\n")).with_context(|| {
+            format!(
+                "Failed to save REAPER user settings {}",
+                self.settings_path.display()
+            )
+        })
     }
 
     fn unavailable(
@@ -492,6 +606,7 @@ impl ReaperClient {
             parameters: HashMap::new(),
             parameters_fresh: false,
             parameter_error: None,
+            practice_dynamics: None,
             config_path: self.config_path.display().to_string(),
             error: Some(error),
         }
@@ -646,6 +761,13 @@ fn validate_config(config: &ReaperConfig) -> Result<()> {
             })?
             .next()
             .ok_or_else(|| anyhow!("REAPER OSC feedback address did not resolve"))?;
+        if let Some(dynamics) = vst.dynamics_after_preset {
+            if !dynamics.is_finite() || !(0.0..=1.0).contains(&dynamics) {
+                return Err(anyhow!(
+                    "pianoteq_vst.dynamics_after_preset must be between 0 and 1"
+                ));
+            }
+        }
         let piano = config
             .pianos
             .iter()
@@ -756,6 +878,7 @@ fn public_pianoteq_snapshot(
         parameters: HashMap::new(),
         parameters_fresh: false,
         parameter_error: None,
+        practice_dynamics: None,
         config_path: config_path.display().to_string(),
         error,
     }
@@ -801,6 +924,10 @@ fn pianoteq_parameter_index(id: &str) -> Option<usize> {
         "room_dimensions" => Some(204),
         _ => None,
     }
+}
+
+fn valid_normalized_value(value: f32) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 fn send_osc_float(destination: &str, address: &str, value: f32) -> Result<()> {
@@ -1454,6 +1581,7 @@ mod tests {
                 [pianoteq_vst]
                 piano_id = "live"
                 track = "Pianoteq Live"
+                dynamics_after_preset = 0.45
                 [[pianoteq_vst.preset]]
                 id = "sk-ex"
                 name = "SK-EX Player"
@@ -1481,6 +1609,7 @@ mod tests {
         assert_eq!(vst.fx, 1);
         assert_eq!(vst.osc_address, DEFAULT_OSC_ADDRESS);
         assert_eq!(vst.osc_feedback_address, DEFAULT_OSC_FEEDBACK_ADDRESS);
+        assert_eq!(vst.dynamics_after_preset, Some(0.45));
         assert_eq!(vst.reverbs.len(), 1);
         assert_eq!(pianoteq_parameter_index("dynamics"), Some(1));
         assert_eq!(pianoteq_parameter_index("not-a-control"), None);
@@ -1574,6 +1703,10 @@ mod tests {
         let client = ReaperClient {
             config_path: PathBuf::from("test.toml"),
             config: Ok(config),
+            settings_path: PathBuf::from("test-user-settings.json"),
+            settings: Arc::new(Mutex::new(ReaperUserSettings {
+                pianoteq_dynamics: 0.45,
+            })),
         };
         let snapshot = client.activate("sk-ex").unwrap();
         assert_eq!(snapshot.active_piano_id.as_deref(), Some("sk-ex"));

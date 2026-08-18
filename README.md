@@ -163,6 +163,9 @@ For daily REAPER-hosted playing, use one `Garritan CFX` track and one reusable
 and mutes the REAPER Master for the physical-piano mode; VST mode unmutes the
 Master before disabling Local Control. Named Small Room, Studio, and Hall
 scenes adjust Pianoteq's reverb parameters independently of instrument presets.
+The separate Practice Dynamics control applies one server-persisted value after
+every named Pianoteq host preset without rewriting the stored presets. All
+phones share the value stored in `%APPDATA%\keyestra\user-settings.json`.
 
 Keyestra groups presets by instrument, prioritizes licensed instruments, and
 stores full-preset and reverb-preset favorites in

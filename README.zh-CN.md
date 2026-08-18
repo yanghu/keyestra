@@ -134,6 +134,9 @@ localhost 的 JSON-RPC 服务：
 Keyestra 会按乐器整理普通和自定义 preset，优先显示已授权的琴，并把常用 preset
 按钮保存在手机浏览器中。Piano 页面还提供适合触控的音量、混响量、Room Size、
 Reverb 开关和 Dynamics 控制；这些调整只改变当前声音，不会另存 preset。
+独立的“练习触键”控制会在每次载入具名 Pianoteq host preset 后覆盖 Dynamics，
+而不改写原始 preset 文件；这个值由后台保存在
+`%APPDATA%\keyestra\user-settings.json`，所有手机共用。
 Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。若 Pianoteq 使用
 其他本机地址，可通过 `keyestra-monitor --pianoteq-rpc <主机:端口>` 指定。
 
