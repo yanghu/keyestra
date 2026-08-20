@@ -43,8 +43,9 @@ use practice::{Practice, PracticeSettings};
 use reaper::ReaperClient;
 use recorder::{Recorder, RecorderError, RecorderErrorCode, TimelineRequest};
 
-const DEFAULT_MIDI_PORT: &str = "Keyestra MIDI";
-const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
+const DEFAULT_MIDI_PORT: &str = "Keyestra Output";
+const LEGACY_MIDI_PORT: &str = "Keyestra MIDI";
+const OLDEST_MIDI_PORT: &str = "FP10 Mapped";
 const LOCAL_CONTROL_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
     Duration::from_millis(300),
@@ -60,7 +61,7 @@ struct Cli {
 
     #[arg(
         long = "in",
-        default_value = "Keyestra MIDI",
+        default_value = "Keyestra Output",
         help = "MIDI input port name substring or index"
     )]
     input: String,
@@ -80,7 +81,7 @@ struct Cli {
 
     #[arg(
         long = "piano-out",
-        default_value = "Clavinova",
+        default_value = "Clavinova-1",
         help = "Physical piano MIDI output used for Local Control"
     )]
     piano_output: String,
@@ -220,6 +221,133 @@ fn sound_switch_steps(mode: PianoSoundMode) -> [SoundSwitchStep; 2] {
         PianoSoundMode::Vst => [
             SoundSwitchStep::ReaperMasterMuted(false),
             SoundSwitchStep::LocalControl(false),
+        ],
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StandaloneSoundMode {
+    Local,
+    Pianoteq,
+}
+
+impl StandaloneSoundMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Pianoteq => "pianoteq",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StandaloneSoundSwitchStep {
+    LocalControl(bool),
+    PianoteqOutput(bool),
+}
+
+#[derive(Debug, Default)]
+struct StandaloneSoundState {
+    mode: Option<StandaloneSoundMode>,
+    local_control: Option<bool>,
+    pianoteq_volume_before_silence: Option<f64>,
+}
+
+struct StandaloneSoundControl {
+    output_name: String,
+    state: Mutex<StandaloneSoundState>,
+}
+
+impl StandaloneSoundControl {
+    fn new(output_name: String) -> Self {
+        Self {
+            output_name,
+            state: Mutex::new(StandaloneSoundState::default()),
+        }
+    }
+
+    fn snapshot(&self, pianoteq: &PianoteqClient) -> serde_json::Value {
+        let pianoteq_volume = pianoteq.volume_normalized().ok();
+        let (remembered_mode, local_control) = self
+            .state
+            .lock()
+            .map(|mut state| {
+                if let Some(volume) = pianoteq_volume.filter(|volume| *volume > 0.0) {
+                    state.pianoteq_volume_before_silence = Some(volume);
+                }
+                (state.mode, state.local_control)
+            })
+            .unwrap_or((None, None));
+        let mode = pianoteq_volume
+            .map(|volume| {
+                if volume == 0.0 {
+                    StandaloneSoundMode::Local
+                } else {
+                    StandaloneSoundMode::Pianoteq
+                }
+            })
+            .or(remembered_mode)
+            .map(StandaloneSoundMode::as_str);
+        serde_json::json!({
+            "mode": mode.unwrap_or("unknown"),
+            "pianoOutput": self.output_name,
+            "localControl": local_control,
+            "pianoteqMuted": pianoteq_volume.map(|volume| volume == 0.0),
+            "pianoteqAvailable": pianoteq_volume.is_some(),
+        })
+    }
+
+    fn set_mode(
+        &self,
+        mode: StandaloneSoundMode,
+        pianoteq: &PianoteqClient,
+    ) -> Result<serde_json::Value> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Standalone sound state lock poisoned"))?;
+        for step in standalone_sound_switch_steps(mode) {
+            match step {
+                StandaloneSoundSwitchStep::LocalControl(enabled) => {
+                    send_local_control(&self.output_name, enabled)?;
+                    state.local_control = Some(enabled);
+                }
+                StandaloneSoundSwitchStep::PianoteqOutput(enabled) => {
+                    if enabled {
+                        let restore_volume = state
+                            .pianoteq_volume_before_silence
+                            .filter(|volume| *volume > 0.0)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "Pianoteq volume was already Off and no previous level is known"
+                                )
+                            })?;
+                        pianoteq.set_volume_normalized(restore_volume)?;
+                    } else {
+                        let current_volume = pianoteq.volume_normalized()?;
+                        if current_volume > 0.0 {
+                            state.pianoteq_volume_before_silence = Some(current_volume);
+                        }
+                        pianoteq.set_volume_normalized(0.0)?;
+                    }
+                }
+            }
+        }
+        state.mode = Some(mode);
+        drop(state);
+        Ok(self.snapshot(pianoteq))
+    }
+}
+
+fn standalone_sound_switch_steps(mode: StandaloneSoundMode) -> [StandaloneSoundSwitchStep; 2] {
+    match mode {
+        StandaloneSoundMode::Local => [
+            StandaloneSoundSwitchStep::LocalControl(true),
+            StandaloneSoundSwitchStep::PianoteqOutput(false),
+        ],
+        StandaloneSoundMode::Pianoteq => [
+            StandaloneSoundSwitchStep::PianoteqOutput(true),
+            StandaloneSoundSwitchStep::LocalControl(false),
         ],
     }
 }
@@ -367,6 +495,15 @@ struct RawMidiEvent {
     kind: String,
     channel: String,
     bytes: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VelocityMappingEvent {
+    time_ms: u128,
+    channel: u8,
+    note: u8,
+    input: u8,
+    output: u8,
 }
 
 #[derive(Debug)]
@@ -550,7 +687,8 @@ fn main() -> Result<()> {
     let preview = Arc::new(MidiPreview::new(Arc::clone(&recorder)));
     let recorder_control = Arc::new(Mutex::new(()));
     let pianoteq = Arc::new(PianoteqClient::new(cli.pianoteq_rpc));
-    let piano_sound = Arc::new(PianoSoundControl::new(cli.piano_output));
+    let piano_sound = Arc::new(PianoSoundControl::new(cli.piano_output.clone()));
+    let standalone_sound = Arc::new(StandaloneSoundControl::new(cli.piano_output));
     let pianoteq_favorites = Arc::new(PianoteqFavoriteStore::discover()?);
     let reaper = Arc::new(ReaperClient::discover(cli.reaper_config));
     let midi_state = Arc::clone(&state);
@@ -597,6 +735,7 @@ fn main() -> Result<()> {
                 let recorder_control = Arc::clone(&recorder_control);
                 let pianoteq = Arc::clone(&pianoteq);
                 let piano_sound = Arc::clone(&piano_sound);
+                let standalone_sound = Arc::clone(&standalone_sound);
                 let pianoteq_favorites = Arc::clone(&pianoteq_favorites);
                 let reaper = Arc::clone(&reaper);
                 thread::spawn(move || {
@@ -611,6 +750,7 @@ fn main() -> Result<()> {
                         recorder_control,
                         pianoteq,
                         piano_sound,
+                        standalone_sound,
                         pianoteq_favorites,
                         reaper,
                     ) {
@@ -666,7 +806,7 @@ fn select_input_port(midi_in: &MidiInput, selector: &PortSelector) -> Result<Mid
 
 fn input_name_candidates(name: &str) -> Vec<&str> {
     if name.eq_ignore_ascii_case(DEFAULT_MIDI_PORT) {
-        vec![name, LEGACY_MIDI_PORT]
+        vec![name, LEGACY_MIDI_PORT, OLDEST_MIDI_PORT]
     } else {
         vec![name]
     }
@@ -701,6 +841,7 @@ fn handle_client(
     recorder_control: Arc<Mutex<()>>,
     pianoteq: Arc<PianoteqClient>,
     piano_sound: Arc<PianoSoundControl>,
+    standalone_sound: Arc<StandaloneSoundControl>,
     pianoteq_favorites: Arc<PianoteqFavoriteStore>,
     reaper: Arc<ReaperClient>,
 ) -> Result<()> {
@@ -912,6 +1053,41 @@ fn handle_client(
                 result_json_response(&mut stream, result)
             }
         }
+        "/standalone-sound-mode" => {
+            if method == "GET" {
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    &standalone_sound.snapshot(&pianoteq).to_string(),
+                )
+            } else if method != "POST" {
+                respond(
+                    &mut stream,
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "Standalone sound mode control requires GET or POST",
+                )
+            } else if !has_control_header {
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "Missing X-Keyestra-Control: 1 header",
+                )
+            } else {
+                let result = match query_value(query, "mode").as_deref() {
+                    Some("local") => {
+                        standalone_sound.set_mode(StandaloneSoundMode::Local, &pianoteq)
+                    }
+                    Some("pianoteq") => {
+                        standalone_sound.set_mode(StandaloneSoundMode::Pianoteq, &pianoteq)
+                    }
+                    _ => Err(anyhow::anyhow!("mode must be local or pianoteq")),
+                };
+                result_json_response(&mut stream, result)
+            }
+        }
         "/reaper-pianos" => {
             if method == "GET" {
                 let body = serde_json::to_string(&reaper.snapshot())?;
@@ -1047,6 +1223,15 @@ fn handle_client(
         }
         "/events" => respond_events(stream, state),
         "/metronome-events" => respond_metronome_events(stream, metronome),
+        "/velocity-curve" => {
+            let body = velocity_mapping_json();
+            respond(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+            )
+        }
         "/seed-log" => {
             let body = match seed_from_tray_log(&state) {
                 Ok(count) => format!("{{\"loaded\":{}}}", count),
@@ -1873,15 +2058,7 @@ fn respond_metronome_events(mut stream: TcpStream, metronome: Arc<Metronome>) ->
 }
 
 fn seed_from_tray_log(state: &Arc<Mutex<MonitorState>>) -> Result<usize> {
-    let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
-    let appdata = std::path::PathBuf::from(appdata);
-    let current_log = appdata.join("keyestra").join("tray.log");
-    let legacy_log = appdata.join("fp10-map").join("tray.log");
-    let log_path = if current_log.exists() {
-        current_log
-    } else {
-        legacy_log
-    };
+    let log_path = tray_log_path()?;
     let text = fs::read_to_string(&log_path)
         .with_context(|| format!("Failed to read {}", log_path.display()))?;
     let events: Vec<(u8, u8)> = text
@@ -1925,7 +2102,81 @@ fn parse_mapped_note(line: &str) -> Option<(u8, u8)> {
     Some((note, mapped))
 }
 
+fn tray_log_path() -> Result<PathBuf> {
+    let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
+    let appdata = PathBuf::from(appdata);
+    let current_log = appdata.join("keyestra").join("tray.log");
+    if current_log.exists() {
+        Ok(current_log)
+    } else {
+        Ok(appdata.join("fp10-map").join("tray.log"))
+    }
+}
+
+fn velocity_mapping_json() -> String {
+    let events = tray_log_path()
+        .and_then(|path| recent_velocity_mappings(&path, 24))
+        .unwrap_or_default();
+    let mut out = String::from("{\"available\":");
+    out.push_str(if events.is_empty() { "false" } else { "true" });
+    out.push_str(",\"events\":[");
+    for (index, event) in events.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        write!(
+            out,
+            "{{\"timeMs\":{},\"channel\":{},\"note\":{},\"input\":{},\"output\":{}}}",
+            event.time_ms, event.channel, event.note, event.input, event.output
+        )
+        .unwrap();
+    }
+    out.push_str("]}");
+    out
+}
+
+fn recent_velocity_mappings(path: &PathBuf, limit: usize) -> Result<Vec<VelocityMappingEvent>> {
+    const TAIL_BYTES: u64 = 128 * 1024;
+    let mut file =
+        fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    let length = file.metadata()?.len();
+    let start = length.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if start > 0 {
+        if let Some(newline) = text.find('\n') {
+            text.drain(..=newline);
+        }
+    }
+    Ok(text
+        .lines()
+        .rev()
+        .filter_map(parse_velocity_mapping)
+        .take(limit)
+        .collect())
+}
+
+fn parse_velocity_mapping(line: &str) -> Option<VelocityMappingEvent> {
+    if !line.starts_with("Note On") {
+        return None;
+    }
+    Some(VelocityMappingEvent {
+        time_ms: parse_after_u128(line, "time_ms=").unwrap_or(0),
+        channel: parse_after(line, "ch=")?,
+        note: parse_after(line, "note=")?,
+        input: parse_after(line, "velocity=")?,
+        output: line.rsplit_once("->")?.1.trim().parse().ok()?,
+    })
+}
+
 fn parse_after(line: &str, marker: &str) -> Option<u8> {
+    let rest = line.split_once(marker)?.1;
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+fn parse_after_u128(line: &str, marker: &str) -> Option<u128> {
     let rest = line.split_once(marker)?.1;
     rest.split_whitespace().next()?.parse().ok()
 }
@@ -2180,8 +2431,12 @@ mod tests {
         assert!(html.contains("id=\"pianoteqCurrentBank\""));
         assert!(html.contains("id=\"pianoteqCurrentReverbName\""));
         assert!(html.contains("id=\"pianoteqReverbQuickHint\""));
-        assert!(html.contains("data-sound-mode=\"local\""));
-        assert!(html.contains("data-sound-mode=\"vst\""));
+        assert!(html.contains("class=\"panel reaper-live-panel\""));
+        assert!(html.contains("data-reaper-sound-mode=\"local\""));
+        assert!(html.contains("data-reaper-sound-mode=\"vst\""));
+        assert!(html.contains("data-standalone-sound-mode=\"local\""));
+        assert!(html.contains("data-standalone-sound-mode=\"pianoteq\""));
+        assert!(html.contains("data-velocity-curve"));
         assert!(html.contains("id=\"wakeLockToggle\""));
         assert!(!html.contains("data-pianoteq-view"));
         assert!(!html.contains("id=\"pianoteqAllPresets\""));
@@ -2189,6 +2444,17 @@ mod tests {
         assert!(MONITOR_JS.contains("replace(/^My\\s+/i"));
         assert!(MONITOR_JS.contains("navigator.wakeLock.request(\"screen\")"));
         assert!(MONITOR_JS.contains("fetch(`/sound-mode?"));
+        assert!(MONITOR_JS.contains("fetch(`/standalone-sound-mode?"));
+        assert!(MONITOR_JS.contains("/velocity-curve"));
+        assert!(MONITOR_JS
+            .contains("reaperPurchasedInstruments=new Set([\"SK-EX\",\"Börsendorfer 280VC\"])"));
+        assert!(MONITOR_JS.contains("reaper-free-presets"));
+        assert!(MONITOR_JS.contains("reaper-demo-presets"));
+        assert!(
+            MONITOR_JS.contains("const demos=reaperVstState.presets.filter(preset=>preset.demo)")
+        );
+        assert!(MONITOR_JS.contains("window.addEventListener(\"scroll\",revealMobileTabs"));
+        assert!(MONITOR_CSS.contains(".app-tabs.scroll-active"));
     }
 
     #[test]
@@ -2212,12 +2478,35 @@ mod tests {
     }
 
     #[test]
-    fn default_monitor_input_falls_back_to_the_legacy_port() {
+    fn default_monitor_input_falls_back_to_legacy_ports() {
         assert_eq!(
             input_name_candidates(DEFAULT_MIDI_PORT),
-            vec![DEFAULT_MIDI_PORT, LEGACY_MIDI_PORT]
+            vec![DEFAULT_MIDI_PORT, LEGACY_MIDI_PORT, OLDEST_MIDI_PORT]
         );
         assert_eq!(input_name_candidates("Custom Port"), vec!["Custom Port"]);
+    }
+
+    #[test]
+    fn mapper_log_line_preserves_raw_and_mapped_velocity() {
+        assert_eq!(
+            parse_velocity_mapping("Note On  time_ms=1787250000123 ch=1 note=60 velocity=30 -> 48"),
+            Some(VelocityMappingEvent {
+                time_ms: 1_787_250_000_123,
+                channel: 1,
+                note: 60,
+                input: 30,
+                output: 48,
+            })
+        );
+        assert!(parse_velocity_mapping("CC       cc=64 value=127 passthrough").is_none());
+    }
+
+    #[test]
+    fn cli_defaults_to_the_monitor_side_of_the_midi_2_route() {
+        let cli = Cli::parse_from(["keyestra-monitor"]);
+
+        assert_eq!(cli.input, "Keyestra Output");
+        assert_eq!(cli.piano_output, "Clavinova-1");
     }
 
     #[test]
@@ -2284,6 +2573,20 @@ mod tests {
             [
                 SoundSwitchStep::ReaperMasterMuted(false),
                 SoundSwitchStep::LocalControl(false),
+            ]
+        );
+        assert_eq!(
+            standalone_sound_switch_steps(StandaloneSoundMode::Local),
+            [
+                StandaloneSoundSwitchStep::LocalControl(true),
+                StandaloneSoundSwitchStep::PianoteqOutput(false),
+            ]
+        );
+        assert_eq!(
+            standalone_sound_switch_steps(StandaloneSoundMode::Pianoteq),
+            [
+                StandaloneSoundSwitchStep::PianoteqOutput(true),
+                StandaloneSoundSwitchStep::LocalControl(false),
             ]
         );
     }

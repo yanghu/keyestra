@@ -21,9 +21,9 @@ Keyestra 位于数码钢琴与软音源或 DAW 之间。它只重新映射 Note 
 
 ## 为什么使用 Keyestra？
 
-数码钢琴与软件音源对触键力度的响应经常并不匹配。Keyestra 可以通过
-可配置的力度曲线改善演奏手感，同时不影响 Note Off、延音踏板、CC、
-弯音和其他 MIDI 消息。
+数码钢琴与软件音源对触键力度的响应经常并不匹配。Keyestra 使用主要 CLP
+力度曲线改善演奏手感，同时不影响 Note Off、延音踏板、CC、弯音和其他
+MIDI 消息。
 
 ![从数码钢琴经过 Keyestra 到软音源、DAW 和 Monitor 的信号流程](docs/keyestra-signal-flow.svg)
 
@@ -32,13 +32,13 @@ Keyestra 同时包含 MIDI 映射器和基于浏览器的演奏助手。已有�
 节奏练习和滚动录音器。
 
 Keyestra 本身不会创建虚拟 MIDI 端口。在 Windows 上请创建名为
-`Keyestra MIDI` 的 loopMIDI 端口；在 macOS 上可使用 IAC Driver 或其他
-已有的虚拟 MIDI 端口。
+`Keyestra MIDI` 和 `Keyestra Output` 的 MIDI 2.0 A/B 端口；在 macOS 上可使用
+IAC Driver 或其他已有的虚拟 MIDI 端口。
 
 ## 主要功能
 
-- **力度曲线调整** — 使用分段曲线或精确的 128 项映射表，让键盘更好地
-  匹配常用软音源。
+- **力度曲线调整** — 主要 CLP 曲线把键盘的原始输入扩展成灵敏的完整 MIDI
+  力度范围。
 - **安全的 MIDI 路由** — Note Off、延音踏板、CC、弯音、Program Change、
   Channel Pressure、SysEx 和未知消息均原样通过。
 - **手机遥控** — 查看力度与和弦、控制节拍器、进行节奏练习和管理录音。
@@ -48,7 +48,7 @@ Keyestra 本身不会创建虚拟 MIDI 端口。在 Windows 上请创建名为
   MIDI 自动生成便于分享的 MP3 或无损 WAV；响度标准化、True Peak 上限和
   输出质量均由模板控制。
 - **可靠的 Windows 托盘程序** — 等待暂时缺失的设备、自动重连、监控映射器，
-  并记住所选力度曲线。
+  并始终使用主要 CLP 曲线。
 
 ## 系统要求
 
@@ -69,6 +69,7 @@ Keyestra 本身不会创建虚拟 MIDI 端口。在 Windows 上请创建名为
 
 ```text
 Keyestra MIDI
+Keyestra Output
 ```
 
 ### 2. 查看 MIDI 端口名称
@@ -87,11 +88,11 @@ cargo build --release `
   --bin keyestra-tray `
   --bin keyestra-monitor
 
-.\target\release\keyestra-tray.exe --in "Roland FP-10"
+.\target\release\keyestra-tray.exe
 ```
 
-请把 `Roland FP-10` 替换为钢琴 MIDI 输入名称中具有辨识度的部分。托盘程序
-默认使用 `Keyestra MIDI` 作为映射输出和 Monitor 输入。
+托盘程序默认使用 `Clavinova-1` 作为钢琴输入，把映射结果发送到 `Keyestra MIDI`，并让
+Monitor 从 `Keyestra Output` 接收。
 
 以上方式适合从 Cargo 输出目录试用。若要安装到当前 Windows 用户并配置
 开机启动，请参阅 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
@@ -106,6 +107,10 @@ cargo build --release `
 ```text
 http://localhost:8770
 ```
+
+测试曲线时，**力度映射验证**面板会并列显示映射器报告的原始 Note On 力度和
+映射后力度，并保留最近的 raw-to-output 对照。这些数值直接来自映射器报告，
+不是根据 Monitor 收到的映射后数据反推。
 
 ## 使用手机遥控
 
@@ -164,7 +169,6 @@ ReaScript bootstrap；它会自动建轨、设置 MIDI/监听/静音并保存标
 
 - 查看映射器和 Monitor 状态；
 - 启动、停止或重启映射；
-- 切换内置力度曲线；
 - 打开 Monitor；
 - 管理 Windows 开机启动；
 - 退出 Keyestra。
@@ -175,8 +179,9 @@ ReaScript bootstrap；它会自动建轨、设置 MIDI/监听/静音并保存标
 默认设置如下：
 
 ```text
-input:   Roland Digital Piano
+input:   Clavinova-1
 output:  Keyestra MIDI
+monitor input: Keyestra Output
 curve:   examples/curve.toml
 monitor: http://localhost:8770
 ```
@@ -256,7 +261,7 @@ Keyestra 不会覆盖源 MIDI，也不会修改可重复使用的 REAPER 模板�
 
 ```toml
 [input]
-name = "Roland Digital Piano"
+name = "Clavinova-1"
 
 [output]
 name = "Keyestra MIDI"
@@ -266,10 +271,13 @@ mode = "piecewise"
 points = [
   [0, 0],
   [1, 0],
-  [18, 30],
-  [32, 57],
-  [50, 84],
-  [108, 127],
+  [6, 3],
+  [7, 4],
+  [15, 14],
+  [30, 48],
+  [60, 91],
+  [90, 117],
+  [120, 127],
   [127, 127],
 ]
 ```
@@ -277,8 +285,10 @@ points = [
 每个点表示 `[输入力度, 输出力度]`。Keyestra 启动时会将这些点插值成力度查找表。
 力度 `0` 始终保持为 `0`，因为 Note On velocity `0` 通常表示 Note Off。
 
-[`examples/curve-mid-control.toml`](examples/curve-mid-control.toml) 在中等力度区域保留
-更多手指控制空间。托盘程序可以在两个内置曲线之间切换；精确表格模式示例位于
+这是 Keyestra 的主要 CLP 曲线。之前的 Linear top-fix 仍随程序提供，位于
+[`examples/curve-top-linear.toml`](examples/curve-top-linear.toml)，高级命令行使用时
+可通过 `--curve` 显式选择。托盘和手机 Monitor 使用主要曲线，不显示曲线选择。
+更早停用的曲线保存在 [`archive/curves`](archive/curves)。精确表格模式示例位于
 [`examples/table.toml`](examples/table.toml)。
 
 ## 高级命令行用法

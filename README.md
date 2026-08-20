@@ -24,8 +24,8 @@ practice, and recoverable recordings.
 ## Why Keyestra?
 
 Digital pianos and software instruments do not always agree about how touch
-should translate into dynamics. Keyestra gives you a configurable velocity
-curve without sacrificing sustain, pitch bend, controllers, or other MIDI
+should translate into dynamics. Keyestra applies its calibrated CLP mapping
+without sacrificing sustain, pitch bend, controllers, or other MIDI
 messages.
 
 ![Signal flow from a digital piano through Keyestra to virtual piano instruments, a DAW, and the Monitor](docs/keyestra-signal-flow.svg)
@@ -35,14 +35,14 @@ companion. The existing virtual port carries the mapped performance to virtual
 piano instruments or DAWs and back into Keyestra's Monitor, rhythm practice,
 and rolling recorder.
 
-Keyestra does not create virtual MIDI ports. On Windows, create a loopMIDI port
-named `Keyestra MIDI`. On macOS, use an IAC Driver port or another existing
-virtual MIDI port.
+Keyestra does not create virtual MIDI ports. On Windows, create the MIDI 2.0
+A/B ports named `Keyestra MIDI` and `Keyestra Output`. On macOS, use IAC Driver
+ports or other existing virtual MIDI ports.
 
 ## Highlights
 
-- **Expressive velocity shaping** — use a piecewise curve or an exact 128-value
-  table to match your piano to your preferred instrument.
+- **Expressive velocity shaping** — the main CLP mapping expands the keyboard's
+  raw input into a responsive full MIDI velocity range.
 - **MIDI-safe routing** — Note Off, sustain, CC, pitch bend, program changes,
   channel pressure, SysEx, and unknown messages pass through unchanged.
 - **Phone remote** — view dynamics and chords, control the metronome, practice
@@ -53,7 +53,7 @@ virtual MIDI port.
   MP3 or lossless WAV through your REAPER and Garritan CFX templates, with the
   templates controlling normalization, true-peak limits, and render quality.
 - **Resilient Windows Tray** — wait for missing devices, reconnect
-  automatically, supervise the mapper, and remember the selected curve.
+  automatically, supervise the mapper, and consistently use the main CLP curve.
 
 ## Requirements
 
@@ -72,10 +72,11 @@ network.
 
 ### 1. Create the virtual port
 
-Create a virtual MIDI port named:
+Create the virtual MIDI ports used by the MIDI 2.0 A/B route:
 
 ```text
 Keyestra MIDI
+Keyestra Output
 ```
 
 ### 2. Confirm your MIDI port names
@@ -95,11 +96,12 @@ cargo build --release `
   --bin keyestra-tray `
   --bin keyestra-monitor
 
-.\target\release\keyestra-tray.exe --in "Roland FP-10"
+.\target\release\keyestra-tray.exe
 ```
 
-Replace `Roland FP-10` with a distinctive part of your piano's MIDI input name.
-The Tray uses `Keyestra MIDI` as the mapped output and Monitor input.
+The Tray uses `Clavinova-1` as the physical input, sends mapped MIDI to
+`Keyestra MIDI`, and listens for Monitor data on `Keyestra Output`. Override
+these defaults with `--in`, `--out`, or `--monitor-in` if the port names change.
 
 This runs directly from Cargo output for evaluation. For a permanent
 current-user installation and Windows Startup integration, follow
@@ -116,6 +118,11 @@ The Monitor is available on the computer at:
 ```text
 http://localhost:8770
 ```
+
+During curve testing, the **Velocity mapper validation** panel shows the exact
+raw Note On velocity reported by the mapper beside its mapped output, plus the
+recent raw-to-output history. This data comes from the mapper report rather
+than being inferred from the mapped Monitor stream.
 
 ## Use your phone as the remote
 
@@ -220,7 +227,6 @@ Right-click the Tray icon to:
 
 - inspect mapper and Monitor status;
 - start, stop, or restart mapping;
-- switch between the built-in velocity curves;
 - open the Monitor;
 - manage Windows Startup; or
 - exit Keyestra.
@@ -231,8 +237,9 @@ state and starts mapping when the devices return.
 The default Tray settings are:
 
 ```text
-input:   Clavinova
+input:   Clavinova-1
 output:  Keyestra MIDI
+monitor input: Keyestra Output
 curve:   examples/curve.toml
 monitor: http://localhost:8770
 ```
@@ -312,7 +319,7 @@ The default curve is [`examples/curve.toml`](examples/curve.toml):
 
 ```toml
 [input]
-name = "Clavinova"
+name = "Clavinova-1"
 
 [output]
 name = "Keyestra MIDI"
@@ -322,10 +329,13 @@ mode = "piecewise"
 points = [
   [0, 0],
   [1, 0],
-  [30, 22],
-  [60, 66],
-  [85, 93],
-  [117, 127],
+  [6, 3],
+  [7, 4],
+  [15, 14],
+  [30, 48],
+  [60, 91],
+  [90, 117],
+  [120, 127],
   [127, 127],
 ]
 ```
@@ -336,9 +346,12 @@ at `0`, because Note On with velocity `0` is commonly used as Note Off.
 Only Note On messages with a nonzero velocity use this curve; Note Off, CC,
 pedal, pitch bend, realtime, and other MIDI messages pass through unchanged.
 
-[`examples/curve-mid-control.toml`](examples/curve-mid-control.toml) keeps more
-finger-control room in the middle velocities. The Tray can switch between both
-built-in curves. Exact table mode is demonstrated in
+This is Keyestra's main CLP mapping. The previous linear top-fix remains bundled
+as [`examples/curve-top-linear.toml`](examples/curve-top-linear.toml) and can be
+selected with the mapper's explicit `--curve` option for advanced command-line
+use. The Tray and mobile Monitor use the main curve and do not expose curve
+selection. Older retired mappings remain under
+[`archive/curves`](archive/curves). Exact table mode is demonstrated in
 [`examples/table.toml`](examples/table.toml).
 
 ## Advanced CLI use

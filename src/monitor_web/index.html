@@ -22,7 +22,11 @@
       <button type="button" class="wake-lock-toggle" id="wakeLockToggle" aria-pressed="false"><span id="wakeLockLabel">常亮</span><small id="wakeLockStatus">待启用</small></button>
     </nav>
     <section class="pianoteq-view" aria-label="Piano Remote">
-      <section class="panel reaper-live-panel" aria-label="REAPER Live Pianos">
+      <details class="panel reaper-live-panel" aria-label="REAPER Live Pianos">
+        <summary class="reaper-live-summary">
+          <span><strong>REAPER Live Pianos</strong><small id="reaperCollapsedStatus">展开 REAPER 控制</small></span>
+        </summary>
+        <div class="reaper-live-body">
         <div class="pianoteq-heading">
           <div>
             <div class="pianoteq-eyebrow">REAPER LIVE PIANOS</div>
@@ -37,10 +41,10 @@
         </div>
         <section class="sound-source-switch live-sound-switch" aria-label="全局声音输出">
           <div role="group" aria-label="全局声音输出">
-            <button type="button" data-sound-mode="local">Clavinova 琴体</button>
-            <button type="button" data-sound-mode="vst">REAPER VST</button>
+            <button type="button" data-reaper-sound-mode="local">Clavinova 琴体</button>
+            <button type="button" data-reaper-sound-mode="vst">REAPER VST</button>
           </div>
-          <small id="soundModeStatus">正在读取声音路由…</small>
+          <small id="reaperSoundModeStatus">正在读取声音路由…</small>
         </section>
         <div class="reaper-piano-grid" id="reaperPianoList"></div>
         <details class="cfx-calibration" id="cfxCalibration" hidden>
@@ -70,7 +74,8 @@
           <button type="button" class="reaper-vst-toggle active" id="reaperVstReverb" aria-pressed="true">Reverb On</button>
           <small class="reaper-vst-status" id="reaperVstStatus">选择 Preset 时读取一次插件当前值；移动滑杆后把绝对值发送给 Pianoteq VST。</small>
         </section>
-      </section>
+        </div>
+      </details>
       <section class="panel pianoteq-panel standalone-pianoteq-panel">
         <div class="pianoteq-heading">
           <div>
@@ -79,6 +84,13 @@
           </div>
           <button type="button" class="pianoteq-refresh" id="pianoteqRefresh">刷新</button>
         </div>
+        <section class="sound-source-switch standalone-sound-switch" aria-label="Standalone 钢琴声音来源">
+          <div role="group" aria-label="Standalone 声音来源">
+            <button type="button" data-standalone-sound-mode="local">Clavinova 琴体</button>
+            <button type="button" data-standalone-sound-mode="pianoteq">Pianoteq</button>
+          </div>
+          <small id="standaloneSoundModeStatus">正在读取声音路由…</small>
+        </section>
         <div class="pianoteq-current">
           <span id="pianoteqCurrentInstrument">当前钢琴</span>
           <strong id="pianoteqCurrent">正在连接…</strong>
@@ -442,6 +454,23 @@
         <div class="bigbar"><div class="fill" id="lastBar" style="width:0%"></div></div>
         <div class="dynamic" id="lastMark">-</div>
       </section>
+    </section>
+    <section class="panel velocity-validation" data-velocity-curve aria-label="Velocity mapper validation">
+      <div class="heading">
+        <div><h2>力度映射验证</h2><div class="summary" id="velocityMappingStatus">等待映射器数据</div></div>
+        <div class="velocity-mapping-note" id="velocityMappingNote">--</div>
+      </div>
+      <div class="velocity-mapping-latest">
+        <div class="velocity-mapping-value raw-value"><span>原始输入</span><strong id="velocityRawValue">--</strong></div>
+        <div class="velocity-mapping-arrow" aria-hidden="true">→</div>
+        <div class="velocity-mapping-value mapped-value"><span>映射输出</span><strong id="velocityMappedValue">--</strong></div>
+        <div class="velocity-mapping-delta"><span>变化</span><strong id="velocityMappingDelta">--</strong></div>
+      </div>
+      <div class="velocity-mapping-bars">
+        <div><span>RAW</span><div><i id="velocityRawBar"></i></div></div>
+        <div><span>OUT</span><div><i id="velocityMappedBar"></i></div></div>
+      </div>
+      <div class="velocity-mapping-history" id="velocityMappingHistory"><span>弹奏后显示最近的 raw → mapped 对照</span></div>
     </section>
     <section class="panel metronome-panel desktop-metronome" aria-label="Metronome">
       <div class="heading">

@@ -1,4 +1,5 @@
 use crate::mapping::MappingReport;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn print_event(message: &[u8], report: MappingReport) {
     match report {
@@ -9,12 +10,23 @@ pub fn print_event(message: &[u8], report: MappingReport) {
             output,
         } => {
             println!(
-                "Note On  ch={} note={} velocity={} -> {}",
-                channel, note, input, output
+                "Note On  time_ms={} ch={} note={} velocity={} -> {}",
+                now_ms(),
+                channel,
+                note,
+                input,
+                output
             );
         }
         MappingReport::Passthrough => print_passthrough(message),
     }
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn print_passthrough(message: &[u8]) {

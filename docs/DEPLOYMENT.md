@@ -31,6 +31,10 @@ The script:
    %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs
    ```
 
+The Startup command records the complete MIDI route explicitly:
+`Clavinova-1` → `Keyestra MIDI`, with the Monitor reading `Keyestra Output`.
+It does not rely on device defaults compiled into the executable.
+
 Normal deployment does not stop the running release. The new version starts
 at the next login or after the current Tray exits, preserving any unsaved
 in-memory recorder buffer.
@@ -88,4 +92,3 @@ Startup is stored at:
 
 Tray logs are stored at `%APPDATA%\keyestra\tray.log`. The active log is capped
 at 5 MB, with one rotated backup at `tray.log.1`.
-

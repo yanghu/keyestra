@@ -224,4 +224,37 @@ mod tests {
         assert_eq!(table[127], 127);
         assert_eq!(table[45], 44);
     }
+
+    #[test]
+    fn linear_top_fix_preserves_the_low_end_and_reaches_full_velocity() {
+        let table = piecewise_table(Some(&[[0, 0], [1, 0], [117, 127], [127, 127]])).unwrap();
+
+        assert_eq!(table[1], 0);
+        assert_eq!(table[30], 32);
+        assert_eq!(table[60], 65);
+        assert_eq!(table[100], 108);
+        assert_eq!(table[117], 127);
+        assert_eq!(table[127], 127);
+    }
+
+    #[test]
+    fn clp_curve_matches_its_control_points() {
+        let points = [
+            [0, 0],
+            [1, 0],
+            [6, 3],
+            [7, 4],
+            [15, 14],
+            [30, 48],
+            [60, 91],
+            [90, 117],
+            [120, 127],
+            [127, 127],
+        ];
+        let table = piecewise_table(Some(&points)).unwrap();
+
+        for [input, output] in points {
+            assert_eq!(table[input as usize], output);
+        }
+    }
 }

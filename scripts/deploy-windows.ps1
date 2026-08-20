@@ -254,7 +254,7 @@ $requiredFiles = @(
     "keyestra-tray.exe",
     "keyestra-monitor.exe",
     "examples\curve.toml",
-    "examples\curve-mid-control.toml",
+    "examples\curve-top-linear.toml",
     "examples\reaper-pianos.toml",
     "scripts\reaper\keyestra-piano-compare-bootstrap.lua",
     "scripts\reaper\keyestra-piano-live-simplify.lua",
@@ -289,7 +289,7 @@ else {
         foreach ($binary in @("keyestra.exe", "keyestra-tray.exe", "keyestra-monitor.exe")) {
             Copy-Item -LiteralPath (Join-Path $cargoOutput $binary) -Destination (Join-Path $stagingDir $binary)
         }
-        foreach ($curve in @("curve.toml", "curve-mid-control.toml", "reaper-pianos.toml")) {
+        foreach ($curve in @("curve.toml", "curve-top-linear.toml", "reaper-pianos.toml")) {
             Copy-Item -LiteralPath (Join-Path $workspace "examples\$curve") -Destination (Join-Path $stagingDir "examples\$curve")
         }
         Copy-Item -LiteralPath (Join-Path $workspace "scripts\reaper\keyestra-piano-compare-bootstrap.lua") -Destination (Join-Path $stagingDir "scripts\reaper\keyestra-piano-compare-bootstrap.lua")
@@ -314,7 +314,8 @@ $currentPath = Join-Path $deploymentRoot "current.json"
 Write-CurrentMetadata -MetadataPath $currentPath -Version $version -Build $build -ReleasePath $releaseDir -SourceState $sourceState
 
 $deployedTray = Join-Path $releaseDir "keyestra-tray.exe"
-$startupInstaller = Start-Process -FilePath $deployedTray -ArgumentList "--install-startup" -Wait -PassThru
+$startupArguments = '--install-startup --in "Clavinova-1" --out "Keyestra MIDI" --monitor-in "Keyestra Output" --piano-out "Clavinova-1"'
+$startupInstaller = Start-Process -FilePath $deployedTray -ArgumentList $startupArguments -Wait -PassThru
 if ($startupInstaller.ExitCode -ne 0) {
     throw "Startup installation failed with exit code $($startupInstaller.ExitCode)."
 }
@@ -324,6 +325,16 @@ if (-not (Test-Path -LiteralPath $startupPath)) {
 $startupScript = Get-Content -Raw -LiteralPath $startupPath
 if ($startupScript.IndexOf($deployedTray, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     throw "Startup does not point to the deployed tray: $deployedTray"
+}
+foreach ($expectedArgument in @(
+    '--in ""Clavinova-1""',
+    '--out ""Keyestra MIDI""',
+    '--monitor-in ""Keyestra Output""',
+    '--piano-out ""Clavinova-1""'
+)) {
+    if ($startupScript.IndexOf($expectedArgument, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "Startup is missing the explicit MIDI route argument: $expectedArgument"
+    }
 }
 
 $activationPending = -not $Activate

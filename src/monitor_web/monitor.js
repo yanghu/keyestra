@@ -38,7 +38,8 @@ const workingRanges = [
 const $ = (id) => document.getElementById(id);
 const reaperVstControlKey = "keyestra-reaper-vst-controls";
 let reaperState = { pianos:[], activePianoId:null, available:false, busy:false };
-let reaperVstState = { configured:false, available:false, presets:[], reverbs:[], busy:false, activePresetId:null, activeReverbId:null };
+let reaperVstState = { configured:false, available:false, presets:[], reverbs:[], busy:false, activePresetId:null, activeReverbId:null, freePresetsOpen:false };
+const reaperPurchasedInstruments=new Set(["SK-EX","Börsendorfer 280VC"]);
 let cfxState = { configured:false, available:false, masterVolumeCc:null, busy:false };
 function cfxVolumeLabel(value){
   const cc=Math.max(0,Math.min(127,Math.round(Number(value))));
@@ -90,10 +91,16 @@ function renderReaperPresetGroupList(presetList){
   ).join("")}</div></section>`).join("");
 }
 function renderReaperPresetGroups(){
-  const regular=reaperVstState.presets.filter(preset=>!preset.demo);
+  const available=reaperVstState.presets.filter(preset=>!preset.demo);
   const demos=reaperVstState.presets.filter(preset=>preset.demo);
+  const purchased=available.filter(preset=>reaperPurchasedInstruments.has(splitReaperPresetName(preset.name).instrument));
+  const free=available.filter(preset=>!reaperPurchasedInstruments.has(splitReaperPresetName(preset.name).instrument));
+  const freeInstrumentCount=new Set(free.map(preset=>splitReaperPresetName(preset.name).instrument)).size;
+  const activeFree=free.find(preset=>preset.id===reaperVstState.activePresetId);
+  const activeFreeName=activeFree ? splitReaperPresetName(activeFree.name).instrument : null;
+  const freeSection=free.length ? `<details class="reaper-free-presets" ${reaperVstState.freePresetsOpen?"open":""}><summary><span><strong>免费琴</strong><em>${activeFreeName?`当前：${escapeHtml(activeFreeName)}`:"默认收起"}</em></span><small>${freeInstrumentCount} 台</small></summary><div>${renderReaperPresetGroupList(free)}</div></details>` : "";
   const demoSection=demos.length ? `<details class="reaper-demo-presets"><summary><span>Demo 琴</span><small>${demos.length}</small></summary><div>${renderReaperPresetGroupList(demos)}</div></details>` : "";
-  return renderReaperPresetGroupList(regular)+demoSection;
+  return renderReaperPresetGroupList(purchased)+freeSection+demoSection;
 }
 function renderReaper(data={}){
   reaperState.pianos=data.pianos || reaperState.pianos;
@@ -101,6 +108,7 @@ function renderReaper(data={}){
   reaperState.available=Boolean(data.available);
   const active=reaperState.pianos.find(piano=>piano.id===reaperState.activePianoId);
   $("reaperCurrent").textContent=active?.name || (data.configured ? "选择一个声音" : "尚未配置");
+  $("reaperCollapsedStatus").textContent=data.available ? (active?.name || "选择一个声音") : (data.error || "REAPER 不可用");
   $("reaperStatus").textContent=data.available ? (data.error || `${reaperState.pianos.length} 个声音已就绪`) : (data.error || "REAPER 不可用");
   $("reaperStatus").classList.toggle("error",!data.available);
   $("reaperPianoList").innerHTML=reaperState.pianos.map(piano=>
@@ -113,6 +121,9 @@ function renderReaperVst(data={}){
   $("reaperVstTarget").textContent=reaperVstState.available ? `${data.track || "Pianoteq"} · FX ${data.fx || 1}` : (data.error || "OSC 控制尚未就绪");
   $("reaperPresetList").hidden=!reaperVstState.presets.length;
   $("reaperPresetList").innerHTML=renderReaperPresetGroups();
+  $("reaperPresetList").querySelector(".reaper-free-presets")?.addEventListener("toggle",event=>{
+    reaperVstState.freePresetsOpen=event.currentTarget.open;
+  });
   $("reaperReverbList").hidden=!reaperVstState.reverbs.length;
   $("reaperReverbList").innerHTML=reaperVstState.reverbs.map(reverb=>
     `<button type="button" class="${reverb.id===reaperVstState.activeReverbId?"active":""}" data-reaper-vst-reverb="${encodeURIComponent(reverb.id)}" ${!reaperVstState.available||reaperVstState.busy?"disabled":""}>${escapeHtml(reverb.name)}</button>`
@@ -156,7 +167,7 @@ async function fetchReaperRemote(showBusy=false){
     renderReaper(await pianosResponse.json());
     renderReaperVst(await vstResponse.json());
     renderCfx(await cfxResponse.json());
-    renderSoundMode(await soundModeResponse.json());
+    renderReaperSoundMode(await soundModeResponse.json());
   }catch(error){
     renderReaper({available:false,error:error.message || "REAPER 控制状态不可用"});
   }finally{ if(showBusy) $("reaperRefresh").disabled=false; }
@@ -276,44 +287,84 @@ function saveReaperVstControl(parameter,value){
   try { localStorage.setItem(reaperVstControlKey,JSON.stringify({...saved,[parameter]:Number(value)})); } catch(error) {}
 }
 let pianoteqState = { available: false, presets: [], reverbPresets: [], favorites: [], reverbFavorites: [], controls: [], busy: false, selectedInstrument: null, currentInstrument: null, currentPresetName: null, currentPresetBank: null, currentReverbPreset: null, showAll: false };
-let soundModeState = { mode:"unknown", pianoOutput:"Clavinova", localControl:null, reaperMasterMuted:null, reaperAvailable:false, busy:false };
-function renderSoundMode(data={}){
-  soundModeState={...soundModeState,...data};
-  document.querySelectorAll("[data-sound-mode]").forEach(button=>{
-    button.classList.toggle("active",button.dataset.soundMode===soundModeState.mode);
-    button.disabled=soundModeState.busy || soundModeState.reaperAvailable===false;
+let reaperSoundModeState = { mode:"unknown", pianoOutput:"Clavinova-1", localControl:null, reaperMasterMuted:null, reaperAvailable:false, busy:false };
+function renderReaperSoundMode(data={}){
+  reaperSoundModeState={...reaperSoundModeState,...data};
+  document.querySelectorAll("[data-reaper-sound-mode]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.reaperSoundMode===reaperSoundModeState.mode);
+    button.disabled=reaperSoundModeState.busy || reaperSoundModeState.reaperAvailable===false;
   });
-  const status=$('soundModeStatus');
+  const status=$("reaperSoundModeStatus");
   status.classList.remove("error");
-  if(soundModeState.busy) status.textContent="正在切换声音来源…";
-  else if(soundModeState.mode==="local") status.textContent=`${soundModeState.pianoOutput} Local Control 开 · REAPER Master 静音`;
-  else if(soundModeState.mode==="vst") status.textContent=`${soundModeState.pianoOutput} Local Control 关 · REAPER VST 发声`;
+  if(reaperSoundModeState.busy) status.textContent="正在切换声音来源…";
+  else if(reaperSoundModeState.mode==="local") status.textContent=`${reaperSoundModeState.pianoOutput} Local Control 开 · REAPER Master 静音`;
+  else if(reaperSoundModeState.mode==="vst") status.textContent=`${reaperSoundModeState.pianoOutput} Local Control 关 · REAPER VST 发声`;
   else status.textContent="尚未同步；请选择琴体或 REAPER VST";
 }
-async function fetchSoundMode(){
+async function fetchReaperSoundMode(){
   try{
     const response=await fetch("/sound-mode",{cache:"no-store"});
     if(!response.ok) throw new Error("声音路由状态不可用");
-    renderSoundMode(await response.json());
+    renderReaperSoundMode(await response.json());
   }catch(error){
-    renderSoundMode();
-    $("soundModeStatus").textContent=error.message || "声音路由状态不可用";
-    $("soundModeStatus").classList.add("error");
+    renderReaperSoundMode();
+    $("reaperSoundModeStatus").textContent=error.message || "声音路由状态不可用";
+    $("reaperSoundModeStatus").classList.add("error");
   }
 }
-async function setSoundMode(mode){
-  if(soundModeState.busy || !["local","vst"].includes(mode)) return;
-  soundModeState.busy=true; renderSoundMode();
+async function setReaperSoundMode(mode){
+  if(reaperSoundModeState.busy || !["local","vst"].includes(mode)) return;
+  reaperSoundModeState.busy=true; renderReaperSoundMode();
   try{
     const response=await fetch(`/sound-mode?${new URLSearchParams({mode})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
     const data=await response.json();
     if(!response.ok) throw new Error(data.error || "声音来源切换失败");
-    soundModeState.busy=false; renderSoundMode(data);
+    reaperSoundModeState.busy=false; renderReaperSoundMode(data);
   }catch(error){
-    soundModeState.busy=false;
-    await fetchSoundMode();
-    $("soundModeStatus").textContent=error.message || "声音来源切换失败";
-    $("soundModeStatus").classList.add("error");
+    reaperSoundModeState.busy=false;
+    await fetchReaperSoundMode();
+    $("reaperSoundModeStatus").textContent=error.message || "声音来源切换失败";
+    $("reaperSoundModeStatus").classList.add("error");
+  }
+}
+let standaloneSoundModeState = { mode:"unknown", pianoOutput:"Clavinova-1", localControl:null, pianoteqMuted:null, pianoteqAvailable:false, busy:false };
+function renderStandaloneSoundMode(data={}){
+  standaloneSoundModeState={...standaloneSoundModeState,...data};
+  document.querySelectorAll("[data-standalone-sound-mode]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.standaloneSoundMode===standaloneSoundModeState.mode);
+    button.disabled=standaloneSoundModeState.busy || standaloneSoundModeState.pianoteqAvailable===false;
+  });
+  const status=$("standaloneSoundModeStatus");
+  status.classList.remove("error");
+  if(standaloneSoundModeState.busy) status.textContent="正在切换声音来源…";
+  else if(standaloneSoundModeState.mode==="local") status.textContent=`${standaloneSoundModeState.pianoOutput} Local Control 开 · Pianoteq 静音`;
+  else if(standaloneSoundModeState.mode==="pianoteq") status.textContent=`${standaloneSoundModeState.pianoOutput} Local Control 关 · Pianoteq 发声`;
+  else status.textContent="尚未同步；请选择琴体或 Pianoteq";
+}
+async function fetchStandaloneSoundMode(){
+  try{
+    const response=await fetch("/standalone-sound-mode",{cache:"no-store"});
+    if(!response.ok) throw new Error("Standalone 声音路由状态不可用");
+    renderStandaloneSoundMode(await response.json());
+  }catch(error){
+    renderStandaloneSoundMode();
+    $("standaloneSoundModeStatus").textContent=error.message || "Standalone 声音路由状态不可用";
+    $("standaloneSoundModeStatus").classList.add("error");
+  }
+}
+async function setStandaloneSoundMode(mode){
+  if(standaloneSoundModeState.busy || !["local","pianoteq"].includes(mode)) return;
+  standaloneSoundModeState.busy=true; renderStandaloneSoundMode();
+  try{
+    const response=await fetch(`/standalone-sound-mode?${new URLSearchParams({mode})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "Standalone 声音来源切换失败");
+    standaloneSoundModeState.busy=false; renderStandaloneSoundMode(data);
+  }catch(error){
+    standaloneSoundModeState.busy=false;
+    await fetchStandaloneSoundMode();
+    $("standaloneSoundModeStatus").textContent=error.message || "Standalone 声音来源切换失败";
+    $("standaloneSoundModeStatus").classList.add("error");
   }
 }
 function presetKey(preset){ return `${preset.bank || ""}\u0000${preset.name}`; }
@@ -527,10 +578,12 @@ function renderPianoteqList(){
 async function fetchPianoteq(){
   $("pianoteqRefresh").disabled=true;
   try{
-    const [response,favoritesResponse]=await Promise.all([
+    const [response,favoritesResponse,soundModeResponse]=await Promise.all([
       fetch("/pianoteq",{cache:"no-store"}),
       fetch("/pianoteq-favorites",{cache:"no-store"}),
+      fetch("/standalone-sound-mode",{cache:"no-store"}),
     ]);
+    if(soundModeResponse.ok) renderStandaloneSoundMode(await soundModeResponse.json());
     if(favoritesResponse.ok){
       const favorites=await favoritesResponse.json();
       pianoteqState.favorites=Array.isArray(favorites.full) ? favorites.full : [];
@@ -647,7 +700,21 @@ document.querySelectorAll("[data-app-tab]").forEach(button=>button.addEventListe
   document.querySelectorAll("[data-app-tab]").forEach(candidate=>candidate.classList.toggle("active",candidate===button));
   try { localStorage.setItem("keyestra-active-tab",button.dataset.appTab); } catch(error) {}
   if(piano) { fetchReaperRemote(); fetchPianoteq(); }
+  revealMobileTabs();
 }));
+const appTabs=document.querySelector(".app-tabs");
+const mobileTabsMedia=window.matchMedia("(max-width: 700px)");
+let appTabsHideTimer=null;
+function revealMobileTabs(){
+  if(!mobileTabsMedia.matches) return;
+  appTabs.classList.add("scroll-active");
+  window.clearTimeout(appTabsHideTimer);
+  appTabsHideTimer=window.setTimeout(()=>{
+    appTabs.classList.remove("scroll-active");
+  },900);
+}
+window.addEventListener("scroll",revealMobileTabs,{passive:true});
+window.addEventListener("touchmove",revealMobileTabs,{passive:true});
 $("reaperRefresh").addEventListener("click",()=>fetchReaperRemote(true));
 $("reaperPianoList").addEventListener("click",event=>{
   const button=event.target.closest("[data-reaper-piano]");
@@ -684,7 +751,8 @@ $("reaperVstReverb").addEventListener("click",()=>{
 restoreReaperVstControls();
 setInterval(()=>{ if(document.querySelector("main").classList.contains("piano-mode") && !reaperState.busy && !reaperVstState.busy) fetchReaperRemote(); },2000);
 $("pianoteqRefresh").addEventListener("click",fetchPianoteq);
-document.querySelectorAll("[data-sound-mode]").forEach(button=>button.addEventListener("click",()=>setSoundMode(button.dataset.soundMode)));
+document.querySelectorAll("[data-reaper-sound-mode]").forEach(button=>button.addEventListener("click",()=>setReaperSoundMode(button.dataset.reaperSoundMode)));
+document.querySelectorAll("[data-standalone-sound-mode]").forEach(button=>button.addEventListener("click",()=>setStandaloneSoundMode(button.dataset.standaloneSoundMode)));
 $("pianoteqSearch").addEventListener("input",renderPianoteqList);
 $("pianoteqInstrumentSearch").addEventListener("input",()=>{ renderPianoteqInstruments(); renderPianoteqList(); });
 $("pianoteqShowAll").addEventListener("click",()=>{
@@ -794,6 +862,43 @@ function filterSummaryText(filter=currentFilterSettings()){
 function noteName(note){
   const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   return `${names[note%12]}${Math.floor(note/12)-1}`;
+}
+function renderVelocityMappings(data={}){
+  const events=Array.isArray(data.events) ? data.events.filter(event=>
+    [event.note,event.input,event.output].every(value=>Number.isInteger(Number(value)))
+  ) : [];
+  const latest=events[0];
+  if(!latest){
+    $("velocityMappingStatus").textContent="等待映射器数据";
+    $("velocityMappingNote").textContent="--";
+    $("velocityRawValue").textContent="--";
+    $("velocityMappedValue").textContent="--";
+    $("velocityMappingDelta").textContent="--";
+    $("velocityRawBar").style.width="0%";
+    $("velocityMappedBar").style.width="0%";
+    return;
+  }
+  const raw=Math.max(0,Math.min(127,Number(latest.input)));
+  const mapped=Math.max(0,Math.min(127,Number(latest.output)));
+  const age=latest.timeMs ? Date.now()-Number(latest.timeMs) : Infinity;
+  $("velocityMappingStatus").textContent=age<2500 ? "实时验证中" : "最近的映射记录";
+  $("velocityMappingNote").textContent=`${noteName(Number(latest.note))} · ch ${Number(latest.channel)}`;
+  $("velocityRawValue").textContent=String(raw);
+  $("velocityMappedValue").textContent=String(mapped);
+  $("velocityMappingDelta").textContent=`${mapped-raw>=0?"+":""}${mapped-raw}`;
+  $("velocityRawBar").style.width=`${raw/127*100}%`;
+  $("velocityMappedBar").style.width=`${mapped/127*100}%`;
+  $("velocityMappingHistory").innerHTML=events.slice(0,16).map(event=>
+    `<span title="${noteName(Number(event.note))}">${Number(event.input)} → ${Number(event.output)}</span>`
+  ).join("");
+}
+async function fetchVelocityMappings(){
+  try {
+    const response=await fetch("/velocity-curve",{cache:"no-store"});
+    if(response.ok) renderVelocityMappings(await response.json());
+  } catch(error) {
+    $("velocityMappingStatus").textContent="映射数据暂不可用";
+  }
 }
 function notePassesFilter(note, filter=currentFilterSettings()){
   if(filter.mode==="right") return note.note >= filter.split;
@@ -2215,3 +2320,5 @@ checkKeyestraUpdate();
 renderWakeLock();
 requestWakeLock();
 connectEvents();
+fetchVelocityMappings();
+window.setInterval(fetchVelocityMappings,220);

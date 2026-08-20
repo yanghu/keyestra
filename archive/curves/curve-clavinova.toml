@@ -1,3 +1,4 @@
+# Archived reference only. This curve is not packaged or selected by Keyestra.
 [input]
 name = "Clavinova"
 
@@ -9,10 +10,9 @@ mode = "piecewise"
 points = [
   [0, 0],
   [1, 0],
-  [18, 28],
-  [32, 50],
-  [50, 74],
-  [70, 92],
-  [108, 127],
+  [30, 22],
+  [60, 66],
+  [85, 93],
+  [117, 127],
   [127, 127],
 ]

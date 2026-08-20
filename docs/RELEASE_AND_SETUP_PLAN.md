@@ -11,7 +11,7 @@ For a user, the intended experience is:
 
 1. download and install or extract Keyestra;
 2. launch **Keyestra**;
-3. choose the piano input, mapped MIDI output, and velocity curve;
+3. choose the piano input and mapped MIDI output;
 4. leave Keyestra in the system tray; and
 5. reopen **Settings** from the Tray whenever the setup changes.
 
@@ -41,11 +41,12 @@ still be delivered as one downloadable setup executable.
 - exposes Monitor, restart, Startup, and exit actions; and
 - reports missing devices without exiting.
 
-### Store settings separately from curve definitions
+### Keep the main curve outside application settings
 
-Application settings describe devices and runtime behavior. Curve files
-describe velocity mapping. Keeping them separate lets users change pianos
-without editing or duplicating curve files.
+Application settings describe devices and runtime behavior. The supported Tray
+mapping is the bundled main CLP `examples/curve.toml`; it is not a user
+setting and the UI must not offer alternative curves. The mapper's explicit
+`--curve` option remains available only for development and diagnostics.
 
 Explicit command-line arguments should continue to override saved settings:
 
@@ -62,9 +63,9 @@ screen should contain:
 
 - **Piano input** — available MIDI inputs, with a refresh action;
 - **Mapped output** — available MIDI outputs;
-- **Monitor input** — defaults to the mapped output and is hidden under
+- **Monitor input** — defaults to `Keyestra Output` and is hidden under
   advanced settings unless changed;
-- **Velocity curve** — built-in presets plus a custom curve file;
+- **Velocity mapping** — read-only confirmation that the main CLP curve is active;
 - **Monitor port** — defaults to `8770`;
 - **Phone access** — allow the Monitor on the trusted local network; and
 - **Start with Windows** — optional and off unless the user selects it.
@@ -82,7 +83,7 @@ first-run screen should leave the Tray running in an unconfigured state, with
 Add **Settings…** to the Tray menu. It opens the same screen used for first
 run. Changing a value should clearly state what will restart:
 
-- curve, input, or output changes restart the mapper;
+- input or output changes restart the mapper;
 - Monitor input, port, or phone-access changes restart the Monitor; and
 - Startup changes only update Windows login behavior.
 
@@ -123,17 +124,13 @@ A possible user-readable shape is:
 version = 1
 
 [midi]
-input = "Roland Digital Piano"
+input = "Clavinova-1"
 output = "Keyestra MIDI"
-monitor_input = "Keyestra MIDI"
+monitor_input = "Keyestra Output"
 
 [monitor]
 port = 8770
 phone_access = true
-
-[curve]
-preset = "forum"
-# custom_path = "C:\\Users\\Alice\\Documents\\my-curve.toml"
 ```
 
 Persist device names rather than port indexes because indexes can change after
@@ -143,9 +140,8 @@ and diagnostic use.
 Settings writes should be atomic. Invalid or newer unsupported settings must
 produce an actionable Tray error and must not overwrite the last valid file.
 
-The current settings file stores only the curve choice and custom path.
-Migration should preserve those values while adding defaults for the new
-fields.
+The legacy settings file may contain a curve choice or custom path. Migration
+should ignore those retired fields and use the bundled main CLP curve.
 
 ## Release folder layout
 
@@ -159,7 +155,7 @@ Keyestra\
 │   └── keyestra-monitor.exe
 ├── curves\
 │   ├── default.toml
-│   └── mid-control.toml
+│   └── top-linear.toml
 ├── README.txt
 └── LICENSE
 ```
@@ -250,7 +246,7 @@ from source.
 ### Stage 1: persistent configuration
 
 - Expand `TraySettings` to cover MIDI and Monitor settings.
-- Define migration from the current curve-only settings.
+- Define migration that ignores the retired curve-only settings.
 - Apply CLI-over-settings precedence.
 - Add validation and atomic writes.
 - Add tests for defaults, migration, precedence, and invalid files.

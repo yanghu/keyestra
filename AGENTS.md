@@ -93,21 +93,22 @@ items in the final response:
 
 - The app does not create virtual MIDI ports. Assume the user creates loopMIDI/IAC
   ports outside this project.
-- `Keyestra MIDI` is the default virtual port. The runtime accepts the legacy
-  `FP10 Mapped` name as a migration fallback.
+- `Keyestra MIDI` is the remapper output and `Keyestra Output` is the Monitor
+  input for the MIDI 2.0 A/B route. The Monitor accepts `Keyestra MIDI` and
+  `FP10 Mapped` as migration fallbacks.
 - Avoid changing default port names casually; they match the README and likely
   the user's local loopMIDI setup.
 - `examples/curve.toml` is the default curve path used by examples and tray fallback.
 - The tray app assumes sibling release binaries named `keyestra.exe` and
   `keyestra-monitor.exe`.
-- Deployed releases include `examples\curve.toml` and
-  `examples\curve-mid-control.toml` beside the sibling binaries, plus
+- Deployed releases include the main CLP `examples\curve.toml` and the retained
+  `examples\curve-top-linear.toml` beside the sibling binaries, plus
   `examples\reaper-pianos.toml` as the REAPER Piano Compare config template and
   the bootstrap, calibration, and MAESTRO benchmark scripts under
   `scripts\reaper` for automated setup.
 - Startup install writes `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\keyestra-tray.vbs`.
-- Legacy settings and recordings are copied from `%APPDATA%\fp10-map` on first
-  use; source files are retained.
+- Legacy recordings are copied from `%APPDATA%\fp10-map` on first use; source
+  files are retained. The Monitor may also seed from the legacy tray log.
 
 ## Coding Notes
 

@@ -12,10 +12,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use clap::Parser;
 use midir::{MidiInput, MidiOutput};
-use serde::{Deserialize, Serialize};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoop};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder};
 
 #[cfg(windows)]
@@ -35,13 +34,13 @@ const LEGACY_MIDI_PORT: &str = "FP10 Mapped";
 #[command(name = "keyestra-tray")]
 #[command(about = "Windows tray companion for Keyestra")]
 struct Cli {
-    #[arg(long = "in", default_value = "Clavinova")]
+    #[arg(long = "in", default_value = "Clavinova-1")]
     input: String,
 
     #[arg(long = "out", default_value = "Keyestra MIDI")]
     output: String,
 
-    #[arg(long = "monitor-in", default_value = "Keyestra MIDI")]
+    #[arg(long = "monitor-in", default_value = "Keyestra Output")]
     monitor_input: String,
 
     #[arg(
@@ -55,9 +54,6 @@ struct Cli {
 
     #[arg(long = "monitor-host", default_value = "0.0.0.0")]
     monitor_host: String,
-
-    #[arg(long)]
-    curve: Option<PathBuf>,
 
     #[arg(long)]
     install_startup: bool,
@@ -96,22 +92,6 @@ enum RuntimeState {
     Waiting,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum CurveChoice {
-    Forum,
-    MidControl,
-    Custom,
-}
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-struct TraySettings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    curve_choice: Option<CurveChoice>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    curve: Option<PathBuf>,
-}
-
 struct RollingLog {
     path: PathBuf,
     file: Option<File>,
@@ -122,7 +102,6 @@ struct RollingLog {
 struct Supervisor {
     mapper: MapperProcess,
     monitor: MonitorProcess,
-    settings_path: PathBuf,
     mapper_desired: DesiredState,
     monitor_desired: DesiredState,
     mapper_runtime: RuntimeState,
@@ -184,10 +163,6 @@ impl MapperProcess {
             let _ = child.kill();
             let _ = child.wait();
         }
-    }
-
-    fn set_curve(&mut self, curve: PathBuf) {
-        self.curve = curve;
     }
 
     fn probe_ports(&self) -> std::result::Result<(), String> {
@@ -366,11 +341,10 @@ impl RollingLog {
 }
 
 impl Supervisor {
-    fn new(mapper: MapperProcess, monitor: MonitorProcess, settings_path: PathBuf) -> Self {
+    fn new(mapper: MapperProcess, monitor: MonitorProcess) -> Self {
         Self {
             mapper,
             monitor,
-            settings_path,
             mapper_desired: DesiredState::Running,
             monitor_desired: DesiredState::Running,
             mapper_runtime: RuntimeState::Stopped,
@@ -526,12 +500,6 @@ impl Supervisor {
         self.tick_mapper();
     }
 
-    fn select_curve(&mut self, curve: PathBuf) {
-        self.mapper.set_curve(curve);
-        let _ = save_tray_settings(&self.settings_path, &self.mapper.curve);
-        self.restart_mapper();
-    }
-
     fn start_monitor(&mut self) {
         self.monitor_desired = DesiredState::Running;
         self.monitor_last_attempt = None;
@@ -587,12 +555,8 @@ impl Supervisor {
         )
     }
 
-    fn curve_choice(&self) -> CurveChoice {
-        curve_choice(&self.mapper.curve)
-    }
-
     fn curve_label(&self) -> &'static str {
-        curve_label(self.curve_choice())
+        "CLP"
     }
 
     fn monitor_url(&self) -> String {
@@ -684,7 +648,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.install_startup {
-        install_startup()?;
+        let piano_output = cli.piano_output.as_deref().unwrap_or(&cli.input);
+        install_startup(&cli.input, &cli.output, &cli.monitor_input, piano_output)?;
         return Ok(());
     }
 
@@ -696,16 +661,8 @@ fn main() -> Result<()> {
     let app_data = app_data_dir()?;
     let mapper_log_path = app_data.join("tray.log");
     let monitor_log_path = app_data.join("monitor.log");
-    let settings_path = app_data.join("tray-settings.toml");
     let mapper_log = Arc::new(Mutex::new(RollingLog::new(mapper_log_path, MAX_LOG_BYTES)?));
-    let curve = cli
-        .curve
-        .or_else(|| {
-            load_tray_settings(&settings_path)
-                .ok()
-                .map(resolve_tray_curve)
-        })
-        .unwrap_or_else(default_curve_path);
+    let curve = default_curve_path();
     let piano_output = cli.piano_output.unwrap_or_else(|| cli.input.clone());
     let mapper = MapperProcess::new(cli.input, cli.output, curve, mapper_log);
     let monitor = MonitorProcess::new(
@@ -716,7 +673,7 @@ fn main() -> Result<()> {
         monitor_log_path,
     );
 
-    run_tray(Supervisor::new(mapper, monitor, settings_path))
+    run_tray(Supervisor::new(mapper, monitor))
 }
 
 fn run_tray(mut supervisor: Supervisor) -> Result<()> {
@@ -732,9 +689,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     let restart_item = MenuItem::new("Restart mapper", true, None);
     let curve_status_item =
         MenuItem::new(format!("Curve: {}", supervisor.curve_label()), false, None);
-    let forum_curve_item = CheckMenuItem::new("Forum curve", true, false, None);
-    let mid_control_curve_item = CheckMenuItem::new("Mid-control curve", true, false, None);
-    let custom_curve_item = CheckMenuItem::new("Custom curve", false, false, None);
     let start_monitor_item = MenuItem::new("Start monitor", true, None);
     let stop_monitor_item = MenuItem::new("Stop monitor", true, None);
     let restart_monitor_item = MenuItem::new("Restart monitor", true, None);
@@ -753,9 +707,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
         &restart_item,
         &PredefinedMenuItem::separator(),
         &curve_status_item,
-        &forum_curve_item,
-        &mid_control_curve_item,
-        &custom_curve_item,
         &PredefinedMenuItem::separator(),
         &start_monitor_item,
         &stop_monitor_item,
@@ -776,7 +727,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
     let menu_rx = MenuEvent::receiver();
     let mut last_mapper_status = String::new();
     let mut last_monitor_status = String::new();
-    let mut last_curve_choice = CurveChoice::Custom;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(1));
@@ -790,21 +740,13 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
             supervisor.tick();
             let mapper_status = supervisor.mapper_status_text();
             let monitor_status = supervisor.monitor_status_text();
-            let curve_choice = supervisor.curve_choice();
-            if mapper_status != last_mapper_status
-                || monitor_status != last_monitor_status
-                || curve_choice != last_curve_choice
-            {
+            if mapper_status != last_mapper_status || monitor_status != last_monitor_status {
                 mapper_status_item.set_text(&mapper_status);
                 monitor_status_item.set_text(&monitor_status);
-                curve_status_item.set_text(format!("Curve: {}", curve_label(curve_choice)));
-                forum_curve_item.set_checked(curve_choice == CurveChoice::Forum);
-                mid_control_curve_item.set_checked(curve_choice == CurveChoice::MidControl);
-                custom_curve_item.set_checked(curve_choice == CurveChoice::Custom);
+                curve_status_item.set_text(format!("Curve: {}", supervisor.curve_label()));
                 let _ = tray_icon.set_tooltip(Some(supervisor.tooltip_text()));
                 last_mapper_status = mapper_status;
                 last_monitor_status = monitor_status;
-                last_curve_choice = curve_choice;
             }
         }
 
@@ -815,10 +757,6 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
                 supervisor.stop_mapper();
             } else if event.id == restart_item.id() {
                 supervisor.restart_mapper();
-            } else if event.id == forum_curve_item.id() {
-                supervisor.select_curve(default_curve_path());
-            } else if event.id == mid_control_curve_item.id() {
-                supervisor.select_curve(mid_control_curve_path());
             } else if event.id == start_monitor_item.id() {
                 supervisor.start_monitor();
             } else if event.id == stop_monitor_item.id() {
@@ -830,7 +768,12 @@ fn run_tray(mut supervisor: Supervisor) -> Result<()> {
             } else if event.id == open_monitor_item.id() {
                 let _ = open_url(&supervisor.monitor_url());
             } else if event.id == install_item.id() {
-                let _ = install_startup();
+                let _ = install_startup(
+                    &supervisor.mapper.input,
+                    &supervisor.mapper.output,
+                    &supervisor.monitor.input,
+                    &supervisor.monitor.piano_output,
+                );
             } else if event.id == uninstall_item.id() {
                 let _ = uninstall_startup();
             } else if event.id == quit_item.id() {
@@ -907,10 +850,6 @@ fn default_curve_path() -> PathBuf {
     curve_path("curve.toml")
 }
 
-fn mid_control_curve_path() -> PathBuf {
-    curve_path("curve-mid-control.toml")
-}
-
 fn curve_path(file_name: &str) -> PathBuf {
     let exe = env::current_exe().ok();
     let Some(exe) = exe else {
@@ -933,108 +872,12 @@ fn curve_path(file_name: &str) -> PathBuf {
     PathBuf::from("examples").join(file_name)
 }
 
-fn curve_choice(path: &Path) -> CurveChoice {
-    if same_path(path, &default_curve_path()) {
-        CurveChoice::Forum
-    } else if same_path(path, &mid_control_curve_path()) {
-        CurveChoice::MidControl
-    } else {
-        CurveChoice::Custom
-    }
-}
-
-fn resolve_tray_curve(settings: TraySettings) -> PathBuf {
-    match settings.curve_choice {
-        Some(CurveChoice::Forum) => default_curve_path(),
-        Some(CurveChoice::MidControl) => mid_control_curve_path(),
-        Some(CurveChoice::Custom) => settings.curve.unwrap_or_else(default_curve_path),
-        None => match settings.curve {
-            Some(path) => match legacy_builtin_curve_choice(&path) {
-                Some(CurveChoice::Forum) => default_curve_path(),
-                Some(CurveChoice::MidControl) => mid_control_curve_path(),
-                _ => path,
-            },
-            None => default_curve_path(),
-        },
-    }
-}
-
-fn legacy_builtin_curve_choice(path: &Path) -> Option<CurveChoice> {
-    let parent_is_examples = path
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("examples"));
-    if !parent_is_examples {
-        return None;
-    }
-
-    match path.file_name().and_then(|name| name.to_str()) {
-        Some(name) if name.eq_ignore_ascii_case("curve.toml") => Some(CurveChoice::Forum),
-        Some(name) if name.eq_ignore_ascii_case("curve-mid-control.toml") => {
-            Some(CurveChoice::MidControl)
-        }
-        _ => None,
-    }
-}
-
-fn curve_label(choice: CurveChoice) -> &'static str {
-    match choice {
-        CurveChoice::Forum => "Forum",
-        CurveChoice::MidControl => "Mid-control",
-        CurveChoice::Custom => "Custom",
-    }
-}
-
-fn same_path(left: &Path, right: &Path) -> bool {
-    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
-    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
-    left == right
-}
-
 fn app_data_dir() -> Result<PathBuf> {
     let appdata = env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
     let appdata = PathBuf::from(appdata);
     let dir = appdata.join("keyestra");
     fs::create_dir_all(&dir)?;
-    let settings = dir.join("tray-settings.toml");
-    let legacy_settings = appdata.join("fp10-map").join("tray-settings.toml");
-    if !settings.exists() && legacy_settings.is_file() {
-        fs::copy(&legacy_settings, &settings).with_context(|| {
-            format!(
-                "Failed to migrate tray settings {} to {}",
-                legacy_settings.display(),
-                settings.display()
-            )
-        })?;
-    }
     Ok(dir)
-}
-
-fn load_tray_settings(path: &Path) -> Result<TraySettings> {
-    if !path.exists() {
-        return Ok(TraySettings::default());
-    }
-
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read tray settings {}", path.display()))?;
-    toml::from_str(&text)
-        .with_context(|| format!("Failed to parse tray settings {}", path.display()))
-}
-
-fn save_tray_settings(path: &Path, curve: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let choice = curve_choice(curve);
-    let settings = TraySettings {
-        curve_choice: Some(choice),
-        curve: (choice == CurveChoice::Custom).then(|| curve.to_path_buf()),
-    };
-    let text = toml::to_string_pretty(&settings)?;
-    fs::write(path, text)
-        .with_context(|| format!("Failed to write tray settings {}", path.display()))
 }
 
 fn startup_script_path() -> Result<PathBuf> {
@@ -1059,16 +902,36 @@ fn legacy_startup_script_path() -> Result<PathBuf> {
         .join("fp10-map-tray.vbs"))
 }
 
-fn install_startup() -> Result<()> {
+fn startup_script(
+    exe: &Path,
+    input: &str,
+    output: &str,
+    monitor_input: &str,
+    piano_output: &str,
+) -> String {
+    let quote = |value: &str| format!("\"\"{}\"\"", value.replace('"', "\"\""));
+    format!(
+        "Set shell = CreateObject(\"WScript.Shell\")\r\nshell.Run \"{} --in {} --out {} --monitor-in {} --piano-out {}\", 0, False\r\n",
+        quote(&exe.display().to_string()),
+        quote(input),
+        quote(output),
+        quote(monitor_input),
+        quote(piano_output),
+    )
+}
+
+fn install_startup(
+    input: &str,
+    output: &str,
+    monitor_input: &str,
+    piano_output: &str,
+) -> Result<()> {
     let exe = env::current_exe()?;
     let script_path = startup_script_path()?;
     if let Some(parent) = script_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let script = format!(
-        "Set shell = CreateObject(\"WScript.Shell\")\r\nshell.Run \"\"\"{}\"\"\", 0, False\r\n",
-        exe.display()
-    );
+    let script = startup_script(&exe, input, output, monitor_input, piano_output);
     fs::write(&script_path, script)?;
     let legacy_script = legacy_startup_script_path()?;
     if legacy_script != script_path && legacy_script.exists() {
@@ -1126,12 +989,13 @@ mod tests {
     fn selector_accepts_index_or_case_insensitive_substring() {
         let names = vec![
             Some("Keyestra MIDI".to_string()),
-            Some("Clavinova".to_string()),
+            Some("Keyestra Output".to_string()),
+            Some("Clavinova-1".to_string()),
         ];
 
         assert!(selector_available("0", &names));
-        assert!(selector_available("claviNOVA", &names));
-        assert!(!selector_available("2", &names));
+        assert!(selector_available("claviNOVA-1", &names));
+        assert!(!selector_available("3", &names));
         assert!(!selector_available("missing", &names));
     }
 
@@ -1172,42 +1036,39 @@ mod tests {
     }
 
     #[test]
-    fn legacy_builtin_curve_is_migrated_to_the_current_executable_layout() {
-        let settings = TraySettings {
-            curve_choice: None,
-            curve: Some(
-                PathBuf::from("old-workspace")
-                    .join("examples")
-                    .join("curve-mid-control.toml"),
-            ),
-        };
-
-        assert!(same_path(
-            &resolve_tray_curve(settings),
-            &mid_control_curve_path()
-        ));
+    fn bundled_curve_is_the_main_clp_curve() {
+        assert_eq!(
+            default_curve_path()
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("curve.toml")
+        );
     }
 
     #[test]
-    fn custom_curve_keeps_its_explicit_path_during_migration() {
-        let custom = PathBuf::from("C:\\Users\\player\\my-curves\\touch.toml");
-        let settings = TraySettings {
-            curve_choice: None,
-            curve: Some(custom.clone()),
-        };
+    fn cli_defaults_match_the_midi_2_port_route() {
+        let cli = Cli::parse_from(["keyestra-tray"]);
 
-        assert_eq!(resolve_tray_curve(settings), custom);
+        assert_eq!(cli.input, "Clavinova-1");
+        assert_eq!(cli.output, "Keyestra MIDI");
+        assert_eq!(cli.monitor_input, "Keyestra Output");
+        assert_eq!(cli.piano_output, None);
     }
 
     #[test]
-    fn builtin_settings_store_a_choice_instead_of_an_install_path() {
-        let settings = TraySettings {
-            curve_choice: Some(CurveChoice::Forum),
-            curve: None,
-        };
-        let text = toml::to_string_pretty(&settings).unwrap();
+    fn startup_script_persists_the_full_midi_route() {
+        let script = startup_script(
+            Path::new(r"C:\Program Files\Keyestra\keyestra-tray.exe"),
+            "Clavinova-1",
+            "Keyestra MIDI",
+            "Keyestra Output",
+            "Clavinova-1",
+        );
 
-        assert!(text.contains("curve_choice = \"forum\""));
-        assert!(!text.contains("curve ="));
+        assert!(script.contains(r#"""C:\Program Files\Keyestra\keyestra-tray.exe"""#));
+        assert!(script.contains(r#"--in ""Clavinova-1"""#));
+        assert!(script.contains(r#"--out ""Keyestra MIDI"""#));
+        assert!(script.contains(r#"--monitor-in ""Keyestra Output"""#));
+        assert!(script.contains(r#"--piano-out ""Clavinova-1"""#));
     }
 }

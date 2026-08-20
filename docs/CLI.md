@@ -17,7 +17,7 @@ substring.
 
 ```powershell
 cargo run -- `
-  --in "Roland FP-10" `
+  --in "Clavinova-1" `
   --out "Keyestra MIDI" `
   --curve examples/curve.toml
 ```
@@ -25,22 +25,22 @@ cargo run -- `
 Print mapped Note On and passthrough activity:
 
 ```powershell
-cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" `
+cargo run -- --in "Clavinova-1" --out "Keyestra MIDI" `
   --curve examples/curve.toml --monitor
 ```
 
 Route all MIDI without velocity mapping:
 
 ```powershell
-cargo run -- --in "Roland FP-10" --out "Keyestra MIDI" --bypass
+cargo run -- --in "Clavinova-1" --out "Keyestra MIDI" --bypass
 ```
 
 ## Run the web Monitor separately
 
 ```powershell
 cargo run --bin keyestra-monitor -- `
-  --in "Keyestra MIDI" `
-  --piano-out "Clavinova" `
+  --in "Keyestra Output" `
+  --piano-out "Clavinova-1" `
   --port 8770
 ```
 
@@ -49,8 +49,8 @@ network can connect. To restrict it to the current computer:
 
 ```powershell
 cargo run --bin keyestra-monitor -- `
-  --in "Keyestra MIDI" `
-  --piano-out "Clavinova" `
+  --in "Keyestra Output" `
+  --piano-out "Clavinova-1" `
   --host 127.0.0.1 `
   --port 8770
 ```
@@ -64,7 +64,7 @@ or differently named templates:
 
 ```powershell
 cargo run --bin keyestra-monitor -- `
-  --in "Keyestra MIDI" `
+  --in "Keyestra Output" `
   --reaper "D:\Audio\REAPER\reaper.exe" `
   --cfx-template "D:\Audio\Templates\Keyestra CFX Render.rpp" `
   --cfx-mp3-template "D:\Audio\Templates\Keyestra CFX Render MP3.rpp"
