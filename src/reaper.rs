@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -237,6 +237,19 @@ impl ReaperClient {
 
         let tracks = fetch_tracks(&config.reaper)?;
         let resolved = resolve_tracks(config, &tracks)?;
+        if matches!(
+            analyze(config, &tracks),
+            Ok(Some(ref active_piano_id)) if active_piano_id == piano_id
+        ) {
+            return Ok(ReaperSnapshot {
+                configured: true,
+                available: true,
+                active_piano_id: Some(piano_id.to_string()),
+                pianos: public_pianos(config),
+                config_path: self.config_path.display().to_string(),
+                error: None,
+            });
+        }
         let selected = resolved
             .get(piano_id)
             .ok_or_else(|| anyhow!("Unknown REAPER piano {piano_id:?}"))?;
@@ -351,35 +364,24 @@ impl ReaperClient {
     }
 
     pub fn load_pianoteq_preset(&self, preset_id: &str) -> Result<ReaperPianoteqSnapshot> {
-        let (vst, track_index) = self.resolve_pianoteq_target()?;
+        let (vst, _) = self.resolve_pianoteq_target()?;
         let preset = pianoteq_midi::preset(preset_id)
             .ok_or_else(|| anyhow!("Unknown REAPER Pianoteq preset {preset_id:?}"))?;
-        // Bind before loading the preset so no REAPER feedback can race past us.
-        // Failure to open feedback must not turn a successful sound change into
-        // a failed request; the snapshot reports that the displayed values are
-        // not fresh instead.
-        let feedback = open_osc_feedback(&vst.osc_feedback_address);
-        pianoteq_midi::send_program_change(&vst.midi_control_output, preset.program_change)?;
-        // Make the loaded Pianoteq sound audible after the state change was sent.
+        // Finish every REAPER mutation first. The dedicated MIDI CC must be the
+        // final external operation so REAPER cannot restore host state after
+        // Pianoteq has loaded its native preset.
         self.activate(&vst.piano_id)?;
-        let mut snapshot = public_pianoteq_snapshot(&self.config_path, vst, true, None);
-        match feedback.and_then(|socket| fetch_pianoteq_parameters(&socket, vst, track_index)) {
-            Ok(parameters) => {
-                snapshot.parameters = parameters;
-                snapshot.parameters_fresh = true;
-            }
-            Err(error) => snapshot.parameter_error = Some(error.to_string()),
-        }
-        Ok(snapshot)
+        pianoteq_midi::send_control_change(&vst.midi_control_output, preset.control_change)?;
+        Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
     }
 
     pub fn reload_pianoteq_preset(&self) -> Result<ReaperPianoteqSnapshot> {
         let (vst, _) = self.resolve_pianoteq_target()?;
-        pianoteq_midi::send_program_change(
-            &vst.midi_control_output,
-            pianoteq_midi::RELOAD_CURRENT_PRESET_PROGRAM_CHANGE,
-        )?;
         self.activate(&vst.piano_id)?;
+        pianoteq_midi::send_control_change(
+            &vst.midi_control_output,
+            pianoteq_midi::RELOAD_CURRENT_PRESET_CONTROL_CHANGE,
+        )?;
         Ok(public_pianoteq_snapshot(&self.config_path, vst, true, None))
     }
 
@@ -673,117 +675,7 @@ fn send_osc_float(destination: &str, address: &str, value: f32) -> Result<()> {
     send_osc(destination, &packet)
 }
 
-fn send_osc_int(destination: &str, address: &str, value: i32) -> Result<()> {
-    let mut packet = osc_string(address);
-    packet.extend_from_slice(&osc_string(",i"));
-    packet.extend_from_slice(&value.to_be_bytes());
-    send_osc(destination, &packet)
-}
-
-fn open_osc_feedback(address: &str) -> Result<UdpSocket> {
-    let address = address
-        .to_socket_addrs()
-        .with_context(|| format!("Invalid REAPER OSC feedback address {address}"))?
-        .next()
-        .ok_or_else(|| anyhow!("REAPER OSC feedback address did not resolve"))?;
-    let socket = UdpSocket::bind(address)
-        .with_context(|| format!("Failed to listen for REAPER OSC feedback on {address}"))?;
-    socket
-        .set_read_timeout(Some(Duration::from_millis(15)))
-        .context("Failed to set the REAPER OSC feedback timeout")?;
-    Ok(socket)
-}
-
-fn fetch_pianoteq_parameters(
-    socket: &UdpSocket,
-    vst: &PianoteqVstConfig,
-    track_index: usize,
-) -> Result<HashMap<String, f32>> {
-    send_osc_int(
-        &vst.osc_address,
-        "/device/track/select",
-        i32::try_from(track_index).context("REAPER track index is too large")?,
-    )?;
-    send_osc_int(
-        &vst.osc_address,
-        "/device/fx/select",
-        i32::try_from(vst.fx).context("REAPER FX index is too large")?,
-    )?;
-
-    let mut parameters = HashMap::new();
-    // Pianoteq's reverb controls (parameters 202-205 in OSC's one-based
-    // numbering) are in REAPER OSC bank 13.
-    for bank in [13_usize] {
-        send_osc_int(&vst.osc_address, "/device/fxparam/bank/select", bank as i32)?;
-        collect_pianoteq_feedback(
-            socket,
-            track_index,
-            vst.fx,
-            bank,
-            Instant::now() + Duration::from_millis(180),
-            &mut parameters,
-        )?;
-    }
-
-    let missing = pianoteq_display_parameters()
-        .iter()
-        .filter_map(|(id, _)| (!parameters.contains_key(*id)).then_some(*id))
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        return Err(anyhow!(
-            "REAPER did not return fresh Pianoteq values for {}. Confirm OSC feedback uses 127.0.0.1:9001 and reload the Keyestra pattern file",
-            missing.join(", ")
-        ));
-    }
-    Ok(parameters)
-}
-
-fn pianoteq_display_parameters() -> [(&'static str, usize); 4] {
-    [
-        ("reverb_switch", 202),
-        ("reverb_duration", 203),
-        ("reverb_mix", 204),
-        ("room_dimensions", 205),
-    ]
-}
-
-fn collect_pianoteq_feedback(
-    socket: &UdpSocket,
-    track_index: usize,
-    fx: usize,
-    bank: usize,
-    deadline: Instant,
-    parameters: &mut HashMap<String, f32>,
-) -> Result<()> {
-    let mut packet = [0_u8; 4096];
-    while Instant::now() < deadline {
-        match socket.recv_from(&mut packet) {
-            Ok((length, _)) => {
-                parse_osc_packet(&packet[..length], &mut |address, value| {
-                    let Some(number) =
-                        osc_feedback_parameter_number(address, track_index, fx, bank)
-                    else {
-                        return;
-                    };
-                    if let Some((id, _)) = pianoteq_display_parameters()
-                        .iter()
-                        .find(|(_, parameter)| *parameter == number)
-                    {
-                        parameters.insert((*id).to_string(), value.clamp(0.0, 1.0));
-                    }
-                })?;
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) => {}
-            Err(error) => return Err(error).context("Failed to receive REAPER OSC feedback"),
-        }
-    }
-    Ok(())
-}
-
+#[cfg(test)]
 fn osc_feedback_parameter_number(
     address: &str,
     track_index: usize,
@@ -812,6 +704,7 @@ fn osc_feedback_parameter_number(
     })
 }
 
+#[cfg(test)]
 fn parse_osc_packet(packet: &[u8], callback: &mut impl FnMut(&str, f32)) -> Result<()> {
     if packet.starts_with(b"#bundle\0") {
         if packet.len() < 16 {
@@ -848,6 +741,7 @@ fn parse_osc_packet(packet: &[u8], callback: &mut impl FnMut(&str, f32)) -> Resu
     Ok(())
 }
 
+#[cfg(test)]
 fn read_osc_string<'a>(packet: &'a [u8], offset: &mut usize) -> Result<&'a str> {
     let start = *offset;
     let end = packet[start..]

@@ -1,113 +1,117 @@
 use anyhow::{anyhow, Context, Result};
 use midir::{MidiOutput, MidiOutputPort};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // Windows MIDI Services MIDI Loopback 2.0 exposes the write side of a pair as
 // "In" and the receiving side as "Out". Keyestra opens Control In for output;
 // REAPER listens to Control Out.
 pub const DEFAULT_CONTROL_WRITE_PORT: &str = "Pianoteq Control In";
-pub const RELOAD_CURRENT_PRESET_PROGRAM_CHANGE: u8 = 41;
+pub const CONTROL_MIDI_CHANNEL: u8 = 16;
+pub const CONTROL_VALUE: u8 = 127;
+pub const RELOAD_CURRENT_PRESET_CONTROL_CHANGE: u8 = 117;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PianoteqPresetMapping {
     pub id: &'static str,
     pub name: &'static str,
     pub pianoteq_preset: &'static str,
-    pub program_change: u8,
+    pub control_change: u8,
 }
 
 // External contract with Pianoteq's manually configured "Keyestra" MIDI
-// Mapping. Application code uses `id`; only this module knows Program Change
-// numbers. Extend this table when another mapping is added in Pianoteq.
+// Mapping. Application code uses `id`; only this module knows the dedicated
+// Control Change numbers. Extend this table when another mapping is added in
+// Pianoteq.
 pub const PRESET_MAPPINGS: &[PianoteqPresetMapping] = &[
     PianoteqPresetMapping {
         id: "sk-ex-player",
         name: "PT | SK-EX | My Player",
         pianoteq_preset: "My Presets/My Kawai SK-EX Player",
-        program_change: 1,
+        control_change: 102,
     },
     PianoteqPresetMapping {
         id: "bosendorfer-vc-player",
         name: "PT | Bösendorfer VC | My Player",
         pianoteq_preset: "My Presets/My Bösendorfer VC Player",
-        program_change: 2,
+        control_change: 103,
     },
     PianoteqPresetMapping {
         id: "sk-ex-warm",
         name: "PT | SK-EX | Warm",
         pianoteq_preset: "Shigeru Kawai SK-EX Warm",
-        program_change: 3,
+        control_change: 104,
     },
     PianoteqPresetMapping {
         id: "sk-ex-prelude",
         name: "PT | SK-EX | Prelude",
         pianoteq_preset: "Shigeru Kawai SK-EX Prelude",
-        program_change: 4,
+        control_change: 105,
     },
     PianoteqPresetMapping {
         id: "bosendorfer-vc-warm",
         name: "PT | Bösendorfer VC | Warm",
         pianoteq_preset: "Bösendorfer VC Warm",
-        program_change: 5,
+        control_change: 106,
     },
     PianoteqPresetMapping {
         id: "bosendorfer-vc-classical-recording",
         name: "PT | Bösendorfer VC | Classical Recording",
         pianoteq_preset: "Bösendorfer VC Classical Recording",
-        program_change: 6,
+        control_change: 107,
     },
     PianoteqPresetMapping {
         id: "bosendorfer-vc-new-age",
         name: "PT | Bösendorfer VC | New Age",
         pianoteq_preset: "Bösendorfer VC New Age",
-        program_change: 7,
+        control_change: 108,
     },
     PianoteqPresetMapping {
         id: "sk-ex-classical-recording",
         name: "PT | SK-EX | Classical Recording",
         pianoteq_preset: "Shigeru Kawai SK-EX Classical Recording",
-        program_change: 8,
+        control_change: 109,
     },
     PianoteqPresetMapping {
         id: "sk-ex-binaural",
         name: "PT | SK-EX | Binaural",
         pianoteq_preset: "Shigeru Kawai SK-EX Binaural",
-        program_change: 9,
+        control_change: 110,
     },
     PianoteqPresetMapping {
         id: "bosendorfer-vc-binaural",
         name: "PT | Bösendorfer VC | Binaural",
         pianoteq_preset: "Bösendorfer VC Binaural",
-        program_change: 10,
+        control_change: 111,
     },
     PianoteqPresetMapping {
         id: "erard-player",
         name: "PT | Erard | Player",
         pianoteq_preset: "Erard Player",
-        program_change: 11,
+        control_change: 112,
     },
     PianoteqPresetMapping {
         id: "cp-80-recording",
         name: "PT | CP-80 | Recording",
         pianoteq_preset: "CP-80 Recording",
-        program_change: 12,
+        control_change: 113,
     },
     PianoteqPresetMapping {
         id: "pleyel-player",
         name: "PT | Pleyel | Player",
         pianoteq_preset: "Pleyel Player",
-        program_change: 13,
+        control_change: 114,
     },
     PianoteqPresetMapping {
         id: "a-walter-415-player",
         name: "PT | A. Walter 415 | Player",
         pianoteq_preset: "A. Walter 415 Player",
-        program_change: 14,
+        control_change: 115,
     },
     PianoteqPresetMapping {
         id: "c-graf-415-player",
         name: "PT | C. Graf 415 | Player",
         pianoteq_preset: "C. Graf 415 Player",
-        program_change: 15,
+        control_change: 116,
     },
 ];
 
@@ -124,7 +128,8 @@ pub fn ensure_control_output(output_name: &str) -> Result<()> {
     resolve_output(&midi_out, output_name).map(|_| ())
 }
 
-pub fn send_program_change(output_name: &str, program_change: u8) -> Result<()> {
+pub fn send_control_change(output_name: &str, control_change: u8) -> Result<()> {
+    let message = control_change_message(control_change)?;
     let midi_out = MidiOutput::new("keyestra-pianoteq-control")?;
     let (port, resolved_name) = resolve_output(&midi_out, output_name)?;
     let mut connection = midi_out
@@ -132,13 +137,29 @@ pub fn send_program_change(output_name: &str, program_change: u8) -> Result<()> 
         .with_context(|| {
             format!("Failed to connect Pianoteq MIDI control output {resolved_name}")
         })?;
-    // Channel 1. The Pianoteq mappings are configured for any channel, and the
-    // attached mapping numbers are used exactly as listed.
-    connection.send(&[0xC0, program_change]).with_context(|| {
-        format!("Failed to send Program Change {program_change} to {resolved_name}")
+    connection.send(&message).with_context(|| {
+        format!("Failed to send Pianoteq CC {control_change} to {resolved_name}")
     })?;
-    println!("Pianoteq MIDI control: sent Program Change {program_change} to {resolved_name}");
+    let time_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis();
+    println!(
+        "Pianoteq MIDI control: time_ms={time_ms} channel={CONTROL_MIDI_CHANNEL} control_change={control_change} value={CONTROL_VALUE} wire_bytes=[{:02X},{:02X},{:02X}] destination={resolved_name}",
+        message[0], message[1], message[2]
+    );
     Ok(())
+}
+
+fn control_change_message(control_change: u8) -> Result<[u8; 3]> {
+    if control_change > 127 {
+        return Err(anyhow!("Pianoteq Control Change must be in 0..=127"));
+    }
+    Ok([
+        0xB0 | (CONTROL_MIDI_CHANNEL - 1),
+        control_change,
+        CONTROL_VALUE,
+    ])
 }
 
 fn resolve_output(midi_out: &MidiOutput, output_name: &str) -> Result<(MidiOutputPort, String)> {
@@ -171,25 +192,35 @@ mod tests {
     #[test]
     fn static_mapping_matches_the_pianoteq_contract() {
         assert_eq!(PRESET_MAPPINGS.len(), 15);
-        assert_eq!(preset("sk-ex-player").unwrap().program_change, 1);
+        assert_eq!(preset("sk-ex-player").unwrap().control_change, 102);
         assert_eq!(
             preset("sk-ex-player").unwrap().pianoteq_preset,
             "My Presets/My Kawai SK-EX Player"
         );
-        assert_eq!(preset("c-graf-415-player").unwrap().program_change, 15);
-        assert_eq!(RELOAD_CURRENT_PRESET_PROGRAM_CHANGE, 41);
+        assert_eq!(preset("c-graf-415-player").unwrap().control_change, 116);
+        assert_eq!(RELOAD_CURRENT_PRESET_CONTROL_CHANGE, 117);
+        assert_eq!(CONTROL_MIDI_CHANNEL, 16);
+        assert_eq!(CONTROL_VALUE, 127);
         assert_eq!(DEFAULT_CONTROL_WRITE_PORT, "Pianoteq Control In");
 
         let ids = PRESET_MAPPINGS
             .iter()
             .map(|preset| preset.id)
             .collect::<HashSet<_>>();
-        let programs = PRESET_MAPPINGS
+        let controls = PRESET_MAPPINGS
             .iter()
-            .map(|preset| preset.program_change)
+            .map(|preset| preset.control_change)
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), PRESET_MAPPINGS.len());
-        assert_eq!(programs.len(), PRESET_MAPPINGS.len());
-        assert!(!programs.contains(&RELOAD_CURRENT_PRESET_PROGRAM_CHANGE));
+        assert_eq!(controls.len(), PRESET_MAPPINGS.len());
+        assert_eq!(controls, (102..=116).collect::<HashSet<_>>());
+        assert!(!controls.contains(&RELOAD_CURRENT_PRESET_CONTROL_CHANGE));
+    }
+
+    #[test]
+    fn pianoteq_controls_use_channel_16_cc_messages() {
+        assert_eq!(control_change_message(102).unwrap(), [0xBF, 102, 127]);
+        assert_eq!(control_change_message(117).unwrap(), [0xBF, 117, 127]);
+        assert!(control_change_message(128).is_err());
     }
 }

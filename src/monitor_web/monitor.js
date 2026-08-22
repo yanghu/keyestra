@@ -39,6 +39,8 @@ const $ = (id) => document.getElementById(id);
 const reaperVstControlKey = "keyestra-reaper-vst-controls";
 let reaperState = { pianos:[], activePianoId:null, available:false, busy:false };
 let reaperVstState = { configured:false, available:false, presets:[], reverbs:[], busy:false, activePresetId:null, activeReverbId:null, freePresetsOpen:false };
+let reaperRefreshPending = false;
+let velocityMappingPollTimer = null;
 const reaperPurchasedInstruments=new Set(["SK-EX","Bösendorfer VC","Bösendorfer 280VC"]);
 function splitReaperPresetName(name){
   const parts=String(name || "").split("|").map(part=>part.trim()).filter(Boolean);
@@ -117,6 +119,8 @@ function applyFreshReaperVstParameters(data={}){
   return true;
 }
 async function fetchReaperRemote(showBusy=false){
+  if(reaperRefreshPending) return;
+  reaperRefreshPending=true;
   if(showBusy) $("reaperRefresh").disabled=true;
   try{
     const [pianosResponse,vstResponse,soundModeResponse]=await Promise.all([
@@ -130,7 +134,7 @@ async function fetchReaperRemote(showBusy=false){
     renderReaperSoundMode(await soundModeResponse.json());
   }catch(error){
     renderReaper({available:false,error:error.message || "REAPER 控制状态不可用"});
-  }finally{ if(showBusy) $("reaperRefresh").disabled=false; }
+  }finally{ reaperRefreshPending=false; if(showBusy) $("reaperRefresh").disabled=false; }
 }
 async function activateReaperPiano(id){
   if(!id || reaperState.busy || !reaperState.available) return;
@@ -168,28 +172,9 @@ async function loadReaperVstPreset(id){
     const data=await response.json();
     if(!response.ok) throw new Error(data.error || "声音插槽载入失败");
     reaperVstState.activePresetId=id;
-    const parametersFresh=applyFreshReaperVstParameters(data);
-    if(reaperVstState.activeReverbId){
-      const reverbResponse=await fetch(`/reaper-pianoteq?${new URLSearchParams({action:"reverb",id:reaperVstState.activeReverbId})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
-      const reverbData=await reverbResponse.json();
-      if(!reverbResponse.ok) throw new Error(reverbData.error || "琴体已切换，但混响环境恢复失败");
-      const reverb=reaperVstState.reverbs.find(candidate=>candidate.id===reaperVstState.activeReverbId);
-      if(reverb){
-        for(const [parameter,value] of [["reverb_duration",reverb.duration],["reverb_mix",reverb.mix],["room_dimensions",reverb.roomDimensions]]){
-          const input=document.querySelector(`[data-reaper-vst-control="${parameter}"] input`);
-          if(input){ input.value=String(value); input.dispatchEvent(new Event("input")); saveReaperVstControl(parameter,value); }
-        }
-        $("reaperVstReverb").setAttribute("aria-pressed","true");
-        $("reaperVstReverb").classList.add("active");
-        $("reaperVstReverb").textContent="Reverb On";
-        saveReaperVstControl("reverb_switch",1);
-      }
-    }
-    $("reaperVstStatus").textContent=!parametersFresh
-      ? `琴体/Preset 已切换，但滑块刷新失败：${data.parameterError || "REAPER 没有返回参数"}`
-      : reaperVstState.activeReverbId
-        ? "琴体/Preset 已切换，并恢复当前混响环境。"
-        : "琴体/Preset 已切换；滑块已刷新为插件当前值。";
+    reaperVstState.activeReverbId=null;
+    try { localStorage.removeItem("keyestra-reaper-vst-reverb"); } catch(error) {}
+    $("reaperVstStatus").textContent="琴体/Preset 已通过最后一步 MIDI 切换；之后未执行 REAPER、OSC 或 VST 操作。";
   }catch(error){ $("reaperVstStatus").textContent=error.message || "声音插槽载入失败"; }
   finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); await fetchReaperRemote(); }
 }
@@ -658,6 +643,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button=>button.addEventListe
   document.querySelectorAll("[data-app-tab]").forEach(candidate=>candidate.classList.toggle("active",candidate===button));
   try { localStorage.setItem("keyestra-active-tab",button.dataset.appTab); } catch(error) {}
   if(piano) { fetchReaperRemote(); fetchPianoteq(); }
+  syncVelocityMappingPolling(!piano);
   revealMobileTabs();
 }));
 const appTabs=document.querySelector(".app-tabs");
@@ -703,7 +689,7 @@ $("reaperVstReverb").addEventListener("click",()=>{
   setReaperVstParameter("reverb_switch",next ? 1 : 0);
 });
 restoreReaperVstControls();
-setInterval(()=>{ if(document.querySelector("main").classList.contains("piano-mode") && !reaperState.busy && !reaperVstState.busy) fetchReaperRemote(); },2000);
+setInterval(()=>{ if(!document.hidden && document.querySelector("main").classList.contains("piano-mode") && !reaperState.available && !reaperState.busy && !reaperVstState.busy) fetchReaperRemote(); },5000);
 $("pianoteqRefresh").addEventListener("click",fetchPianoteq);
 document.querySelectorAll("[data-reaper-sound-mode]").forEach(button=>button.addEventListener("click",()=>setReaperSoundMode(button.dataset.reaperSoundMode)));
 document.querySelectorAll("[data-standalone-sound-mode]").forEach(button=>button.addEventListener("click",()=>setStandaloneSoundMode(button.dataset.standaloneSoundMode)));
@@ -853,6 +839,12 @@ async function fetchVelocityMappings(){
   } catch(error) {
     $("velocityMappingStatus").textContent="映射数据暂不可用";
   }
+}
+function syncVelocityMappingPolling(refresh=false){
+  const monitorVisible=!document.hidden && !document.querySelector("main").classList.contains("piano-mode");
+  if(monitorVisible && !velocityMappingPollTimer) velocityMappingPollTimer=setInterval(fetchVelocityMappings,1500);
+  if(!monitorVisible && velocityMappingPollTimer){ clearInterval(velocityMappingPollTimer); velocityMappingPollTimer=null; }
+  if(refresh && monitorVisible) fetchVelocityMappings();
 }
 function notePassesFilter(note, filter=currentFilterSettings()){
   if(filter.mode==="right") return note.note >= filter.split;
@@ -1311,6 +1303,7 @@ let practiceState = null;
 let practiceBusy = false;
 let practiceFetchPending = false;
 let practiceFormInitialized = false;
+let practicePollTimer = null;
 function practiceIsActive(practice){
   return ["countIn","running","paused"].includes(practice?.status);
 }
@@ -1321,6 +1314,7 @@ function signedMilliseconds(value){
 }
 function renderPractice(practice){
   practiceState=practice;
+  syncPracticePolling();
   const active=practiceIsActive(practice);
   const running=["countIn","running"].includes(practice.status);
   const settings=practice.settings || {};
@@ -1386,6 +1380,11 @@ async function fetchPractice(){
     $("practiceMessage").textContent="节奏练习服务离线";
   }finally{ practiceFetchPending=false; }
 }
+function syncPracticePolling(){
+  const shouldPoll=!document.hidden && ["countIn","running"].includes(practiceState?.status);
+  if(shouldPoll && !practicePollTimer) practicePollTimer=setInterval(fetchPractice,180);
+  if(!shouldPoll && practicePollTimer){ clearInterval(practicePollTimer); practicePollTimer=null; }
+}
 async function practiceAction(action){
   if(practiceBusy) return;
   practiceBusy=true;
@@ -1423,12 +1422,13 @@ $("practicePrimary").addEventListener("click",()=>{
 $("practiceFinish").addEventListener("click",()=>practiceAction("finish"));
 $("practiceReset").addEventListener("click",()=>practiceAction("reset"));
 fetchPractice();
-setInterval(fetchPractice,180);
 let recorderState = null;
 let recorderBusy = false;
 let recorderFetchPending = false;
 let cfxRenderState = {available:false,jobs:[]};
 let cfxRenderFetchPending = false;
+let recorderPollTimer = null;
+let cfxRenderPollTimer = null;
 function formatRecorderDuration(milliseconds){
   const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -1499,7 +1499,13 @@ async function fetchCfxRenders(){
     if(recorderState) renderRecorder(recorderState);
   } catch(error){
     cfxRenderState={available:false,jobs:[],unavailableReason:"CFX render service offline"};
-  } finally { cfxRenderFetchPending=false; }
+  } finally { cfxRenderFetchPending=false; syncCfxRenderPolling(); }
+}
+function cfxRendering(){ return (cfxRenderState.jobs || []).some(job=>["queued","rendering"].includes(job.state)); }
+function syncCfxRenderPolling(){
+  const shouldPoll=!document.hidden && cfxRendering();
+  if(shouldPoll && !cfxRenderPollTimer) cfxRenderPollTimer=setInterval(fetchCfxRenders,1000);
+  if(!shouldPoll && cfxRenderPollTimer){ clearInterval(cfxRenderPollTimer); cfxRenderPollTimer=null; }
 }
 async function startCfxRender(recordingName,format){
   try{
@@ -1527,7 +1533,12 @@ async function fetchRecorder(){
   catch(e){
     $("recorderMessage").textContent="Recorder offline";
     $("recorderMessage").classList.remove("ok");
-  } finally { recorderFetchPending=false; }
+  } finally { recorderFetchPending=false; syncRecorderPolling(); }
+}
+function syncRecorderPolling(){
+  const shouldPoll=!document.hidden && Boolean(recorderState?.recording);
+  if(shouldPoll && !recorderPollTimer) recorderPollTimer=setInterval(fetchRecorder,1000);
+  if(!shouldPoll && recorderPollTimer){ clearInterval(recorderPollTimer); recorderPollTimer=null; }
 }
 async function recorderAction(button){
   if(recorderBusy) return;
@@ -1549,13 +1560,12 @@ async function recorderAction(button){
   } finally {
     recorderBusy=false;
     if(recorderState) renderRecorder(recorderState);
+    syncRecorderPolling();
   }
 }
 document.querySelectorAll("[data-recorder-action]").forEach(button=>button.addEventListener("click",()=>recorderAction(button)));
 fetchRecorder();
 fetchCfxRenders();
-setInterval(fetchRecorder,1000);
-setInterval(fetchCfxRenders,1000);
 const clipState={
   sessionId:null, availableStartUs:0, availableEndUs:0, viewStartUs:0, viewEndUs:0,
   startUs:null, endUs:null, focus:"start", preset:"all", timeline:null, overview:null,
@@ -2259,7 +2269,15 @@ document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"){
     checkKeyestraUpdate();
     requestWakeLock();
+    fetchPractice();
+    fetchRecorder();
+    fetchCfxRenders();
+    syncVelocityMappingPolling(true);
   }
+  syncPracticePolling();
+  syncRecorderPolling();
+  syncCfxRenderPolling();
+  syncVelocityMappingPolling();
 });
 window.addEventListener("pageshow",()=>{ checkKeyestraUpdate(); requestWakeLock(); });
 window.setInterval(checkKeyestraUpdate,30000);
@@ -2274,5 +2292,4 @@ checkKeyestraUpdate();
 renderWakeLock();
 requestWakeLock();
 connectEvents();
-fetchVelocityMappings();
-window.setInterval(fetchVelocityMappings,220);
+syncVelocityMappingPolling(true);

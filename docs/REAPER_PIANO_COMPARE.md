@@ -253,8 +253,8 @@ is:
 
 | Need | Control path |
 | --- | --- |
-| Select a complete Pianoteq sound | Pianoteq Global MIDI Mapping + MIDI Program Change |
-| Enter/leave the frozen live-response mode | Dedicated MIDI Program Change mappings in Pianoteq |
+| Select a complete Pianoteq sound | Pianoteq Global MIDI Mapping + dedicated MIDI CC |
+| Reload the current sound | Dedicated MIDI CC mapping in Pianoteq |
 | Fine, absolute Dynamics/Volume/Reverb adjustment | REAPER OSC/VST parameter control, when that parameter is exposed |
 
 Create and save the **Global MIDI Mapping** in Pianoteq Standalone, where the
@@ -265,20 +265,17 @@ dedicated Freeze and Unfreeze MIDI mappings; do not expect a Standalone Freeze
 setting to change the VST.
 
 Keyestra now uses the static mapping in
-[PIANOTEQ_MIDI_MAPPING.md](PIANOTEQ_MIDI_MAPPING.md): Program Changes `1–15`
-select the initial preset list and `41` reloads the current preset. The private
+[PIANOTEQ_MIDI_MAPPING.md](PIANOTEQ_MIDI_MAPPING.md): channel-16 CC messages
+`102–116` select the initial preset list and CC117 reloads the current preset. The private
 Keyestra's write destination defaults to `Pianoteq Control In`; configure
 REAPER's Pianoteq track to receive the paired `Pianoteq Control Out` port. Do
 not enable that input on Garritan or other instrument tracks.
 
-The local Keyestra setup has verified that a Program Change mapped in
-Standalone can select the corresponding Pianoteq-internal preset in the REAPER
-VST and preserve the VST instance's frozen Dynamics and Main Volume. This is a
-local integration result, not a general assumption about every Pianoteq VST3
-host/version.
+The dedicated CC transport avoids REAPER/VST3 Program Change handling. Do not
+reuse the old Program Change mappings for the REAPER VST path.
 
 When leaving Freeze to hear a preset's own Dynamics or Volume, first send the
-Unfreeze mapping and then re-send that preset's Program Change. Freeze only
+Unfreeze mapping and then re-send that preset's control CC. Freeze only
 prevents a subsequent preset load from overwriting the current value; turning
 it off does not itself restore the value stored in the preset.
 

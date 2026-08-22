@@ -847,6 +847,10 @@ fn handle_client(
     pianoteq_favorites: Arc<PianoteqFavoriteStore>,
     reaper: Arc<ReaperClient>,
 ) -> Result<()> {
+    let request_client = stream
+        .peer_addr()
+        .map(|address| address.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
 
@@ -1155,9 +1159,28 @@ fn handle_client(
                     }
                     Some("preset") => {
                         let preset = query_value(query, "id").unwrap_or_default();
+                        let mapping = pianoteq_midi::preset(&preset);
+                        let control_change = mapping
+                            .map(|mapping| mapping.control_change.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        println!(
+                            "Pianoteq preset request: time_ms={} client={} id={} channel={} control_change={} value={}",
+                            now_ms(), request_client, preset, pianoteq_midi::CONTROL_MIDI_CHANNEL,
+                            control_change, pianoteq_midi::CONTROL_VALUE
+                        );
                         reaper.load_pianoteq_preset(&preset)
                     }
-                    Some("reload-preset") => reaper.reload_pianoteq_preset(),
+                    Some("reload-preset") => {
+                        println!(
+                            "Pianoteq preset request: time_ms={} client={} id=reload-current channel={} control_change={} value={}",
+                            now_ms(),
+                            request_client,
+                            pianoteq_midi::CONTROL_MIDI_CHANNEL,
+                            pianoteq_midi::RELOAD_CURRENT_PRESET_CONTROL_CHANGE,
+                            pianoteq_midi::CONTROL_VALUE
+                        );
+                        reaper.reload_pianoteq_preset()
+                    }
                     Some("reverb") => {
                         let reverb_id = query_value(query, "id").unwrap_or_default();
                         reaper.load_pianoteq_reverb(&reverb_id)
@@ -2413,6 +2436,14 @@ mod tests {
         assert!(MONITOR_JS.contains(
             "reaperPurchasedInstruments=new Set([\"SK-EX\",\"Bösendorfer VC\",\"Bösendorfer 280VC\"])"
         ));
+        let preset_loader = MONITOR_JS
+            .split_once("async function loadReaperVstPreset")
+            .and_then(|(_, rest)| rest.split_once("async function reloadReaperVstPreset"))
+            .map(|(loader, _)| loader)
+            .expect("REAPER Pianoteq preset loader must remain present");
+        assert!(!preset_loader.contains("action:\"reverb\""));
+        assert!(!preset_loader.contains("applyFreshReaperVstParameters"));
+        assert!(preset_loader.contains("最后一步 MIDI"));
         assert!(MONITOR_JS.contains("reaper-free-presets"));
         assert!(MONITOR_JS.contains("reaper-demo-presets"));
         assert!(
@@ -2420,6 +2451,19 @@ mod tests {
         );
         assert!(MONITOR_JS.contains("window.addEventListener(\"scroll\",revealMobileTabs"));
         assert!(MONITOR_CSS.contains(".app-tabs.scroll-active"));
+    }
+
+    #[test]
+    fn monitor_web_avoids_idle_http_polling() {
+        assert!(MONITOR_JS.contains(
+            "const shouldPoll=!document.hidden && [\"countIn\",\"running\"].includes(practiceState?.status)"
+        ));
+        assert!(MONITOR_JS
+            .contains("const shouldPoll=!document.hidden && Boolean(recorderState?.recording)"));
+        assert!(MONITOR_JS.contains("const shouldPoll=!document.hidden && cfxRendering()"));
+        assert!(MONITOR_JS.contains("const monitorVisible=!document.hidden && !document.querySelector(\"main\").classList.contains(\"piano-mode\")"));
+        assert!(MONITOR_JS.contains("document.querySelector(\"main\").classList.contains(\"piano-mode\") && !reaperState.available"));
+        assert!(!MONITOR_JS.contains("window.setInterval(fetchVelocityMappings,220)"));
     }
 
     #[test]
