@@ -57,27 +57,7 @@ main.piano-mode > .pianoteq-view { display:block; }
 .reaper-demo-presets[open] > summary::after { transform:none; }
 .reaper-demo-presets > summary small { min-width:23px; border-radius:999px; background:var(--soft); padding:2px 6px; text-align:center; }
 .reaper-demo-presets > div { padding:0 8px 8px; }
-.cfx-calibration { margin-top:10px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
-.cfx-calibration > summary { display:flex; min-height:48px; align-items:center; padding:8px 11px; color:var(--accent); cursor:pointer; list-style:none; }
-.cfx-calibration > summary::-webkit-details-marker { display:none; }
-.cfx-calibration > summary::after { content:"⌄"; margin-left:auto; color:var(--muted); font-size:17px; transform:rotate(-90deg); }
-.cfx-calibration[open] > summary::after { transform:none; }
-.cfx-calibration > summary span { display:grid; gap:2px; }
-.cfx-calibration > summary strong { font-size:13px; }
-.cfx-calibration > summary small { color:var(--muted); font-size:10px; }
-.cfx-calibration > label { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; padding:2px 11px 10px; }
-.cfx-calibration > label span { color:var(--muted); font-size:11px; font-weight:850; }
-.cfx-calibration > label input { grid-column:1/-1; width:100%; accent-color:var(--accent); }
-.cfx-calibration > label output { color:var(--accent); font-size:12px; font-weight:900; }
-.cfx-calibration > small { display:block; padding:0 11px 10px; color:var(--muted); font-size:10px; line-height:1.4; }
 .reaper-vst-remote { margin-top:12px; border-top:1px solid var(--line); padding-top:12px; }
-.reaper-practice-dynamics { margin-top:10px; padding:12px; border:1px solid rgba(31,119,105,.28); border-radius:10px; background:rgba(31,119,105,.07); }
-.reaper-practice-dynamics > div { display:flex; justify-content:space-between; gap:12px; margin-bottom:9px; }
-.reaper-practice-dynamics > div small { color:var(--muted); font-size:10px; text-align:right; }
-.reaper-practice-dynamics label { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; align-items:center; }
-.reaper-practice-dynamics label span { color:var(--ink); font-size:12px; font-weight:900; }
-.reaper-practice-dynamics label input { grid-column:1/-1; width:100%; accent-color:var(--accent); }
-.reaper-practice-dynamics label output { color:var(--accent); font-size:13px; font-weight:900; }
 .reaper-vst-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }
 .reaper-vst-controls label { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; align-items:center; padding:10px; border:1px solid var(--line); border-radius:9px; background:#fbfcfa; }
 .reaper-vst-controls span { color:var(--muted); font-size:11px; font-weight:850; }

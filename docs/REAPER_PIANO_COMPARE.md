@@ -230,40 +230,61 @@ fx = 1
 osc_address = "127.0.0.1:9000"
 # Optional; this is the default and must match the OSC surface's device port.
 osc_feedback_address = "127.0.0.1:9001"
-# Optional normalized override applied after every named instrument preset.
-dynamics_after_preset = 0.45
+# Optional; this dedicated port carries native Pianoteq preset commands only.
+midi_control_output = "Pianoteq Control In"
 ```
 
-The phone exposes Dynamics, Reverb on/off, Reverb Duration, Reverb Mix, and
+The phone exposes Reverb on/off, Reverb Duration, Reverb Mix, and
 Room Dimensions. It sends absolute normalized values when a slider is released.
 After a named instrument preset is selected, Keyestra briefly listens for OSC
 feedback and asks REAPER for the two parameter banks containing these controls.
 The sliders are updated only when a complete fresh snapshot arrives; Keyestra
 does not continuously poll plug-in parameters.
 
-`dynamics_after_preset` is the initial value for a reversible practice overlay.
-The separate **Practice Dynamics** slider saves the user's latest value in the
-server-side `%APPDATA%\keyestra\user-settings.json`; it is shared by every
-phone. Keyestra loads the complete REAPER host preset first and then applies
-the saved Dynamics value. It does not rewrite REAPER's encoded user-preset
-file, and selecting the preset directly in REAPER still uses its stored value.
+The OSC pattern also returns FX parameter names. This permits safe discovery of
+what Pianoteq actually exposes to the host; do not assume a control visible in
+the Pianoteq UI is necessarily a VST/OSC parameter.
 
-### Add named sound slots
+### Live Pianoteq-internal preset architecture
 
-Choose a complete sound inside the Pianoteq plug-in, then use the preset menu
-in REAPER's FX header to save it under a unique name. Add the same host preset
-to the config:
+For the daily `Pianoteq Live` track, Pianoteq's own presets—not REAPER FX
+presets—are the preferred sound source. The intended division of responsibility
+is:
 
-```toml
-[[pianoteq_vst.preset]]
-id = "sk-ex-player"
-name = "SK-EX Player"
-reaper_preset = "SK-EX Player"
-```
+| Need | Control path |
+| --- | --- |
+| Select a complete Pianoteq sound | Pianoteq Global MIDI Mapping + MIDI Program Change |
+| Enter/leave the frozen live-response mode | Dedicated MIDI Program Change mappings in Pianoteq |
+| Fine, absolute Dynamics/Volume/Reverb adjustment | REAPER OSC/VST parameter control, when that parameter is exposed |
 
-Repeat this for the ten or twenty sounds worth keeping on the phone. A sound
-slot stores the complete host-visible plug-in state; the quick controls can
-then make temporary Dynamics and room adjustments on top.
+Create and save the **Global MIDI Mapping** in Pianoteq Standalone, where the
+Preset Manager is available. The mapping configuration is shared with the VST
+instance. The **Freeze state is not shared**: it belongs to each individual
+Pianoteq instance. Therefore configure the VST instance by sending its own
+dedicated Freeze and Unfreeze MIDI mappings; do not expect a Standalone Freeze
+setting to change the VST.
+
+Keyestra now uses the static mapping in
+[PIANOTEQ_MIDI_MAPPING.md](PIANOTEQ_MIDI_MAPPING.md): Program Changes `1–15`
+select the initial preset list and `41` reloads the current preset. The private
+Keyestra's write destination defaults to `Pianoteq Control In`; configure
+REAPER's Pianoteq track to receive the paired `Pianoteq Control Out` port. Do
+not enable that input on Garritan or other instrument tracks.
+
+The local Keyestra setup has verified that a Program Change mapped in
+Standalone can select the corresponding Pianoteq-internal preset in the REAPER
+VST and preserve the VST instance's frozen Dynamics and Main Volume. This is a
+local integration result, not a general assumption about every Pianoteq VST3
+host/version.
+
+When leaving Freeze to hear a preset's own Dynamics or Volume, first send the
+Unfreeze mapping and then re-send that preset's Program Change. Freeze only
+prevents a subsequent preset load from overwriting the current value; turning
+it off does not itself restore the value stored in the preset.
+
+Old `[[pianoteq_vst.preset]]` REAPER host-preset entries remain parseable for
+configuration migration but are ignored. Extend the centralized static mapping
+only after creating the corresponding native MIDI Mapping entry in Pianoteq.
 
 For an alternate config location, start the monitor with:
 

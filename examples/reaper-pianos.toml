@@ -6,14 +6,6 @@ address = "127.0.0.1:8080"
 # password = "change-me"
 timeout_ms = 800
 
-[cfx_vst]
-piano_id = "cfx"
-track = "Garritan CFX"
-fx = 1
-# Zero-based REAPER parameter index. Garritan documents CC007 as Master Volume.
-master_volume_parameter = 7
-osc_address = "127.0.0.1:9000"
-
 # Prototype control target. REAPER receives OSC on this PC only; the phone still
 # connects exclusively to Keyestra's normal web port.
 [pianoteq_vst]
@@ -24,10 +16,10 @@ osc_address = "127.0.0.1:9000"
 # Must match the OSC surface's device port. Keyestra listens only while fetching
 # fresh control values after a named preset is selected.
 osc_feedback_address = "127.0.0.1:9001"
-# Practice-oriented overlay applied after every named instrument preset. The
-# stored REAPER host presets remain unchanged and reversible.
-dynamics_after_preset = 0.45
-
+midi_control_output = "Pianoteq Control In"
+# The displayed presets come from the static Keyestra mapping in
+# src/pianoteq_midi.rs. Old [[pianoteq_vst.preset]] entries below are accepted
+# only for migration and are ignored by native Pianoteq preset selection.
 [[pianoteq_vst.preset]]
 id = "sk-ex-player"
 name = "PT | SK-EX | Player"

@@ -141,6 +141,10 @@ impl MapperProcess {
             .arg("--curve")
             .arg(&self.curve)
             .arg("--monitor")
+            // Windows MIDI Services has rejected the CLP's Active Sensing
+            // heartbeats after a virtual endpoint restart. They carry no
+            // performance data and are intentionally omitted by the Tray.
+            .arg("--drop-active-sensing")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 

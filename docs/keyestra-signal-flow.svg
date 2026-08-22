@@ -102,7 +102,7 @@
   </g>
   <text class="label" x="1051" y="294" text-anchor="middle">EXISTING VIRTUAL PORT</text>
   <text class="title" x="1051" y="324" text-anchor="middle">Keyestra MIDI</text>
-  <text class="small" x="1051" y="348" text-anchor="middle">loopMIDI / IAC</text>
+  <text class="small" x="1051" y="348" text-anchor="middle">Windows MIDI Services / IAC</text>
 
   <!-- External consumers -->
   <g filter="url(#shadow)">

@@ -39,41 +39,7 @@ const $ = (id) => document.getElementById(id);
 const reaperVstControlKey = "keyestra-reaper-vst-controls";
 let reaperState = { pianos:[], activePianoId:null, available:false, busy:false };
 let reaperVstState = { configured:false, available:false, presets:[], reverbs:[], busy:false, activePresetId:null, activeReverbId:null, freePresetsOpen:false };
-const reaperPurchasedInstruments=new Set(["SK-EX","Börsendorfer 280VC"]);
-let cfxState = { configured:false, available:false, masterVolumeCc:null, busy:false };
-function cfxVolumeLabel(value){
-  const cc=Math.max(0,Math.min(127,Math.round(Number(value))));
-  const attenuation=cc===0 ? "−∞ dB" : `≈ ${(20*Math.log10(cc/127)).toFixed(1)} dB`;
-  return `CC7 ${cc} · ${attenuation}`;
-}
-function renderCfx(data={}){
-  cfxState={...cfxState,...data};
-  $("cfxCalibration").hidden=!cfxState.configured;
-  const input=$("cfxMasterVolume");
-  const hasValue=Number.isInteger(cfxState.masterVolumeCc);
-  if(hasValue) input.value=String(cfxState.masterVolumeCc);
-  input.disabled=!cfxState.available||cfxState.busy;
-  const label=hasValue ? cfxVolumeLabel(cfxState.masterVolumeCc) : "尚未校准";
-  $("cfxMasterVolumeOutput").textContent=label;
-  $("cfxCalibrationSummary").textContent=label;
-  if(data.error) $("cfxCalibrationStatus").textContent=data.error;
-}
-async function setCfxMasterVolume(value){
-  if(cfxState.busy || !cfxState.available) return;
-  const cc=Math.max(0,Math.min(127,Math.round(Number(value))));
-  cfxState.busy=true; renderCfx();
-  $("cfxCalibrationStatus").textContent="正在写入 CFX 并保存 Live 工程…";
-  try{
-    const response=await fetch(`/reaper-cfx?${new URLSearchParams({masterVolumeCc:String(cc)})}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
-    const data=await response.json();
-    if(!response.ok) throw new Error(data.error || "CFX 音量保存失败");
-    cfxState.busy=false; renderCfx(data);
-    $("cfxCalibrationStatus").textContent="已写入 CFX Master Volume，并保存 Live 工程。";
-  }catch(error){
-    cfxState.busy=false; renderCfx();
-    $("cfxCalibrationStatus").textContent=error.message || "CFX 音量保存失败";
-  }
-}
+const reaperPurchasedInstruments=new Set(["SK-EX","Bösendorfer VC","Bösendorfer 280VC"]);
 function splitReaperPresetName(name){
   const parts=String(name || "").split("|").map(part=>part.trim()).filter(Boolean);
   if(parts.at(-1)?.toLowerCase()==="demo") parts.pop();
@@ -118,7 +84,7 @@ function renderReaper(data={}){
 function renderReaperVst(data={}){
   reaperVstState={...reaperVstState,...data,presets:data.presets || reaperVstState.presets,reverbs:data.reverbs || reaperVstState.reverbs};
   $("reaperVstRemote").hidden=!reaperVstState.configured;
-  $("reaperVstTarget").textContent=reaperVstState.available ? `${data.track || "Pianoteq"} · FX ${data.fx || 1}` : (data.error || "OSC 控制尚未就绪");
+  $("reaperVstTarget").textContent=reaperVstState.available ? `${data.track || "Pianoteq"} · KS 写入: ${data.midiControlOutput || "Pianoteq Control In"} · REAPER 接收: Pianoteq Control Out · Parameters: FX ${data.fx || 1}` : (data.error || "Pianoteq 控制尚未就绪");
   $("reaperPresetList").hidden=!reaperVstState.presets.length;
   $("reaperPresetList").innerHTML=renderReaperPresetGroups();
   $("reaperPresetList").querySelector(".reaper-free-presets")?.addEventListener("toggle",event=>{
@@ -130,11 +96,7 @@ function renderReaperVst(data={}){
   ).join("");
   document.querySelectorAll("[data-reaper-vst-control] input").forEach(input=>input.disabled=!reaperVstState.available||reaperVstState.busy);
   $("reaperVstReverb").disabled=!reaperVstState.available||reaperVstState.busy;
-  if(Number.isFinite(Number(data.practiceDynamics))){
-    const input=document.querySelector('[data-reaper-vst-control="dynamics"] input');
-    input.value=String(data.practiceDynamics);
-    input.dispatchEvent(new Event("input"));
-  }
+  $("reaperVstReload").disabled=!reaperVstState.available||reaperVstState.busy;
 }
 function applyFreshReaperVstParameters(data={}){
   if(!data.parametersFresh || !data.parameters) return false;
@@ -144,7 +106,7 @@ function applyFreshReaperVstParameters(data={}){
     if(input && Number.isFinite(Number(value))){
       input.value=String(value);
       input.dispatchEvent(new Event("input"));
-      if(parameter!=="dynamics") saveReaperVstControl(parameter,value);
+      saveReaperVstControl(parameter,value);
     }
   }
   const reverbOn=Number(data.parameters.reverb_switch)>=0.5;
@@ -157,16 +119,14 @@ function applyFreshReaperVstParameters(data={}){
 async function fetchReaperRemote(showBusy=false){
   if(showBusy) $("reaperRefresh").disabled=true;
   try{
-    const [pianosResponse,vstResponse,cfxResponse,soundModeResponse]=await Promise.all([
+    const [pianosResponse,vstResponse,soundModeResponse]=await Promise.all([
       fetch("/reaper-pianos",{cache:"no-store"}),
       fetch("/reaper-pianoteq",{cache:"no-store"}),
-      fetch("/reaper-cfx",{cache:"no-store"}),
       fetch("/sound-mode",{cache:"no-store"}),
     ]);
-    if(!pianosResponse.ok || !vstResponse.ok || !cfxResponse.ok || !soundModeResponse.ok) throw new Error("REAPER 控制状态不可用");
+    if(!pianosResponse.ok || !vstResponse.ok || !soundModeResponse.ok) throw new Error("REAPER 控制状态不可用");
     renderReaper(await pianosResponse.json());
     renderReaperVst(await vstResponse.json());
-    renderCfx(await cfxResponse.json());
     renderReaperSoundMode(await soundModeResponse.json());
   }catch(error){
     renderReaper({available:false,error:error.message || "REAPER 控制状态不可用"});
@@ -196,20 +156,6 @@ async function setReaperVstParameter(parameter,value){
     if(!response.ok) throw new Error(data.error || "Pianoteq 参数发送失败");
     $("reaperVstStatus").textContent="已发送到 REAPER；移动插件控件可核对结果。";
   }catch(error){ $("reaperVstStatus").textContent=error.message || "Pianoteq 参数发送失败"; }
-  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
-}
-async function setReaperPracticeDynamics(value){
-  if(reaperVstState.busy || !reaperVstState.available) return;
-  reaperVstState.busy=true; renderReaperVst(reaperVstState);
-  $("reaperVstStatus").textContent="正在保存练习 Dynamics 到这台电脑…";
-  const params=new URLSearchParams({action:"practice-dynamics",value:Number(value).toFixed(4)});
-  try{
-    const response=await fetch(`/reaper-pianoteq?${params}`,{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
-    const data=await response.json();
-    if(!response.ok) throw new Error(data.error || "Dynamics 保存失败");
-    renderReaperVst(data);
-    $("reaperVstStatus").textContent=`练习 Dynamics 已保存为 ${Math.round(Number(data.practiceDynamics)*100)}%；换 Preset 后仍保持此值。`;
-  }catch(error){ $("reaperVstStatus").textContent=error.message || "Dynamics 保存失败"; }
   finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); }
 }
 async function loadReaperVstPreset(id){
@@ -242,9 +188,21 @@ async function loadReaperVstPreset(id){
     $("reaperVstStatus").textContent=!parametersFresh
       ? `琴体/Preset 已切换，但滑块刷新失败：${data.parameterError || "REAPER 没有返回参数"}`
       : reaperVstState.activeReverbId
-        ? "琴体/Preset 已切换；已刷新真实 Dynamics，并恢复当前混响环境。"
+        ? "琴体/Preset 已切换，并恢复当前混响环境。"
         : "琴体/Preset 已切换；滑块已刷新为插件当前值。";
   }catch(error){ $("reaperVstStatus").textContent=error.message || "声音插槽载入失败"; }
+  finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); await fetchReaperRemote(); }
+}
+async function reloadReaperVstPreset(){
+  if(reaperVstState.busy || !reaperVstState.available) return;
+  reaperVstState.busy=true; renderReaperVst(reaperVstState);
+  $("reaperVstStatus").textContent="正在通过 Pianoteq MIDI Mapping 重新载入当前 Preset…";
+  try{
+    const response=await fetch("/reaper-pianoteq?action=reload-preset",{method:"POST",headers:{"X-Keyestra-Control":"1"},cache:"no-store"});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.error || "Preset 重新载入失败");
+    $("reaperVstStatus").textContent="已通过 Pianoteq MIDI Mapping 重新载入当前 Preset。";
+  }catch(error){ $("reaperVstStatus").textContent=error.message || "Preset 重新载入失败"; }
   finally{ reaperVstState.busy=false; renderReaperVst(reaperVstState); await fetchReaperRemote(); }
 }
 async function loadReaperVstReverb(id){
@@ -276,7 +234,7 @@ function restoreReaperVstControls(){
   document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
     const input=control.querySelector("input");
     const value=Number(saved[control.dataset.reaperVstControl]);
-    if(control.dataset.reaperVstControl!=="dynamics" && Number.isFinite(value)) input.value=String(value);
+    if(Number.isFinite(value)) input.value=String(value);
     control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`;
   });
   try { reaperVstState.activeReverbId=localStorage.getItem("keyestra-reaper-vst-reverb"); } catch(error) {}
@@ -724,21 +682,17 @@ $("reaperPresetList").addEventListener("click",event=>{
   const button=event.target.closest("[data-reaper-vst-preset]");
   if(button) loadReaperVstPreset(decodeURIComponent(button.dataset.reaperVstPreset));
 });
+$("reaperVstReload").addEventListener("click",reloadReaperVstPreset);
 $("reaperReverbList").addEventListener("click",event=>{
   const button=event.target.closest("[data-reaper-vst-reverb]");
   if(button) loadReaperVstReverb(decodeURIComponent(button.dataset.reaperVstReverb));
 });
-$("cfxMasterVolume").addEventListener("input",event=>{
-  $("cfxMasterVolumeOutput").textContent=cfxVolumeLabel(event.target.value);
-});
-$("cfxMasterVolume").addEventListener("change",event=>setCfxMasterVolume(event.target.value));
 document.querySelectorAll("[data-reaper-vst-control]").forEach(control=>{
   const input=control.querySelector("input");
   input.addEventListener("input",()=>{ control.querySelector("output").textContent=`${Math.round(Number(input.value)*100)}%`; });
   input.addEventListener("change",()=>{
     const parameter=control.dataset.reaperVstControl;
-    if(parameter==="dynamics") setReaperPracticeDynamics(input.value);
-    else { saveReaperVstControl(parameter,input.value); setReaperVstParameter(parameter,input.value); }
+    saveReaperVstControl(parameter,input.value); setReaperVstParameter(parameter,input.value);
   });
 });
 $("reaperVstReverb").addEventListener("click",()=>{

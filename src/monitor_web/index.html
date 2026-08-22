@@ -47,25 +47,13 @@
           <small id="reaperSoundModeStatus">正在读取声音路由…</small>
         </section>
         <div class="reaper-piano-grid" id="reaperPianoList"></div>
-        <details class="cfx-calibration" id="cfxCalibration" hidden>
-          <summary><span><strong>Garritan CFX 音量校准</strong><small id="cfxCalibrationSummary">尚未校准</small></span></summary>
-          <label>
-            <span>插件 Master Volume（CC7）</span>
-            <input id="cfxMasterVolume" type="range" min="0" max="127" step="1" value="64">
-            <output id="cfxMasterVolumeOutput">尚未校准</output>
-          </label>
-          <small id="cfxCalibrationStatus">移动后会保存 CFX 插件状态和 Live 工程；不会调整 Pianoteq。</small>
-        </details>
         <section class="reaper-vst-remote" id="reaperVstRemote" hidden>
           <div class="pianoteq-section-head">
             <div><h3>Pianoteq Live</h3><span id="reaperVstTarget">REAPER 插件微调</span></div>
+            <button type="button" id="reaperVstReload">重新载入当前 Preset</button>
           </div>
           <div class="reaper-preset-grid" id="reaperPresetList" hidden></div>
           <div class="reaper-reverb-grid" id="reaperReverbList" hidden></div>
-          <div class="reaper-practice-dynamics">
-            <div><strong>练习触键</strong><small>由这台电脑保存；切换 Preset 后仍保持</small></div>
-            <label data-reaper-vst-control="dynamics"><span>Dynamics</span><input type="range" min="0" max="1" step="0.01" value="0.45"><output>45%</output></label>
-          </div>
           <div class="reaper-vst-controls">
             <label data-reaper-vst-control="reverb_duration"><span>Reverb Duration</span><input type="range" min="0" max="1" step="0.01" value="0.30"><output>30%</output></label>
             <label data-reaper-vst-control="reverb_mix"><span>Reverb Mix</span><input type="range" min="0" max="1" step="0.01" value="0.50"><output>50%</output></label>

@@ -44,7 +44,9 @@ ports or other existing virtual MIDI ports.
 - **Expressive velocity shaping** — the main CLP mapping expands the keyboard's
   raw input into a responsive full MIDI velocity range.
 - **MIDI-safe routing** — Note Off, sustain, CC, pitch bend, program changes,
-  channel pressure, SysEx, and unknown messages pass through unchanged.
+  channel pressure, SysEx, and unknown messages pass through unchanged. The
+  Windows Tray omits Active Sensing (`0xFE`) heartbeats because some Windows
+  virtual MIDI endpoints reject them; standalone use can still forward them.
 - **Phone remote** — view dynamics and chords, control the metronome, practice
   rhythm, and manage recordings without keeping the computer in front of you.
 - **Rolling recorder** — recover the latest performance, mark Takes, select a
@@ -61,7 +63,7 @@ The complete Tray and deployment workflow is currently Windows-focused. To try
 Keyestra from this repository, you need:
 
 - a digital piano or MIDI keyboard;
-- a virtual MIDI port such as loopMIDI;
+- Windows MIDI Services with a MIDI Loopback 2.0 endpoint;
 - a software instrument or DAW that can receive the mapped MIDI port; and
 - a Rust toolchain with `cargo`.
 
@@ -170,16 +172,13 @@ For daily REAPER-hosted playing, use one `Garritan CFX` track and one reusable
 and mutes the REAPER Master for the physical-piano mode; VST mode unmutes the
 Master before disabling Local Control. Named Small Room, Studio, and Hall
 scenes adjust Pianoteq's reverb parameters independently of instrument presets.
-The separate Practice Dynamics control applies one server-persisted value after
-every named Pianoteq host preset without rewriting the stored presets. All
-phones share the value stored in `%APPDATA%\keyestra\user-settings.json`.
 
 Keyestra groups presets by instrument, prioritizes licensed instruments, and
 stores full-preset and reverb-preset favorites in
 `%APPDATA%\keyestra\pianoteq-favorites.json`, shared by every phone and browser
 that opens the same Monitor. The list can switch between Favorites-only and all
-presets. The Piano tab also offers touch-friendly controls for volume and
-Dynamics, plus previous/next switching among Favorite reverb presets. Modified
+presets. The Piano tab also offers touch-friendly controls for volume plus
+previous/next switching among Favorite reverb presets. Modified
 sounds can overwrite the current user preset or be saved into Pianoteq's `My
 Presets` bank under a new name; Keyestra only manages the Favorite marker, not
 the preset contents.
@@ -209,11 +208,21 @@ their respective collection with a **Demo** badge.
 The **Piano** tab can also switch among preloaded REAPER instrument tracks,
 including sampled pianos such as Garritan CFX and Pianoteq models hosted as
 plug-ins. The selector uses REAPER's built-in web interface locally and
-confirms the resulting mute state. An optional local-only OSC connection lets
-the same page load curated REAPER host presets and adjust the active Pianoteq
-VST's Dynamics and room controls while REAPER remains the only ASIO host.
+confirms the resulting mute state. A Windows MIDI Services MIDI Loopback 2.0
+pair (`Pianoteq Control In` written by Keyestra, `Pianoteq Control Out` read by
+REAPER) lets the same page select Pianoteq's native presets, while a local-only
+OSC connection adjusts exposed Pianoteq VST parameters. REAPER remains the
+only ASIO host.
 Standalone Pianoteq RPC control remains available lower in the same tab when
 the standalone application is intentionally running.
+
+For the daily Pianoteq Live workflow, Pianoteq-internal sounds are selected by
+the static [Pianoteq MIDI Mapping contract](docs/PIANOTEQ_MIDI_MAPPING.md) and
+received only by the REAPER Pianoteq track. The Global MIDI Mapping is shared,
+but Parameter Freeze is per Pianoteq instance: map explicit Freeze and Unfreeze
+events for the VST rather than expecting Standalone's Freeze state to carry
+over. REAPER OSC remains the path for precise exposed VST-parameter adjustments. See
+[REAPER Piano Compare setup](docs/REAPER_PIANO_COMPARE.md#live-pianoteq-internal-preset-architecture).
 
 See [REAPER Piano Compare setup](docs/REAPER_PIANO_COMPARE.md) for the REAPER
 bootstrap ReaScript, one-time plug-in confirmation boundary, project layout,

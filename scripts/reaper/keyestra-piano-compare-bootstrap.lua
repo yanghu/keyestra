@@ -244,7 +244,7 @@ local function main()
   local midi_index, midi_name = find_midi_input()
   if not midi_index then
     reaper.MB(
-      "No Keyestra MIDI input was found. Create/enable 'Keyestra MIDI' in loopMIDI, then run this script again.",
+      "No Keyestra MIDI input was found. Create/enable 'Keyestra MIDI' with Windows MIDI Services MIDI Loopback 2.0, then run this script again.",
       "Keyestra Piano Compare",
       0
     )

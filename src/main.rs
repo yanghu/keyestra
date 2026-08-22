@@ -34,6 +34,12 @@ struct Cli {
 
     #[arg(long, help = "Forward every MIDI message unchanged")]
     bypass: bool,
+
+    #[arg(
+        long,
+        help = "Do not forward MIDI Active Sensing (0xFE) messages to the output"
+    )]
+    drop_active_sensing: bool,
 }
 
 fn main() -> Result<()> {
@@ -78,5 +84,12 @@ fn main() -> Result<()> {
         let _ = shutdown_tx.send(());
     })?;
 
-    run_forwarder(input, output, mapper, cli.monitor, shutdown_rx)
+    run_forwarder(
+        input,
+        output,
+        mapper,
+        cli.monitor,
+        cli.drop_active_sensing,
+        shutdown_rx,
+    )
 }

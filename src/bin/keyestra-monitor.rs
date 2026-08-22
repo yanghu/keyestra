@@ -27,6 +27,8 @@ mod midi_preview;
 mod pianoteq;
 #[path = "../pianoteq_favorites.rs"]
 mod pianoteq_favorites;
+#[path = "../pianoteq_midi.rs"]
+mod pianoteq_midi;
 #[path = "../practice.rs"]
 mod practice;
 #[path = "../reaper.rs"]
@@ -1151,58 +1153,20 @@ fn handle_client(
                             .ok_or_else(|| anyhow::anyhow!("Missing or invalid parameter value"));
                         value.and_then(|value| reaper.set_pianoteq_parameter(&parameter, value))
                     }
-                    Some("practice-dynamics") => {
-                        let value = query_value(query, "value")
-                            .and_then(|value| value.parse::<f32>().ok())
-                            .ok_or_else(|| anyhow::anyhow!("Missing or invalid Dynamics value"));
-                        value.and_then(|value| reaper.set_practice_dynamics(value))
-                    }
                     Some("preset") => {
                         let preset = query_value(query, "id").unwrap_or_default();
                         reaper.load_pianoteq_preset(&preset)
                     }
+                    Some("reload-preset") => reaper.reload_pianoteq_preset(),
                     Some("reverb") => {
                         let reverb_id = query_value(query, "id").unwrap_or_default();
                         reaper.load_pianoteq_reverb(&reverb_id)
                     }
                     _ => Err(anyhow::anyhow!(
-                        "action must be parameter, practice-dynamics, preset, or reverb"
+                        "action must be parameter, preset, reload-preset, or reverb"
                     )),
                 }
                 .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
-                result_json_response(&mut stream, result)
-            }
-        }
-        "/reaper-cfx" => {
-            if method == "GET" {
-                let body = serde_json::to_string(&reaper.cfx_snapshot())?;
-                respond(
-                    &mut stream,
-                    "200 OK",
-                    "application/json; charset=utf-8",
-                    &body,
-                )
-            } else if method != "POST" {
-                respond(
-                    &mut stream,
-                    "405 Method Not Allowed",
-                    "text/plain; charset=utf-8",
-                    "REAPER CFX control requires GET or POST",
-                )
-            } else if !has_control_header {
-                respond(
-                    &mut stream,
-                    "403 Forbidden",
-                    "text/plain; charset=utf-8",
-                    "Missing X-Keyestra-Control: 1 header",
-                )
-            } else {
-                let result = query_value(query, "masterVolumeCc")
-                    .and_then(|value| value.parse::<u8>().ok())
-                    .filter(|value| *value <= 127)
-                    .ok_or_else(|| anyhow::anyhow!("masterVolumeCc must be between 0 and 127"))
-                    .and_then(|value| reaper.set_cfx_master_volume(value))
-                    .and_then(|snapshot| serde_json::to_value(snapshot).map_err(Into::into));
                 result_json_response(&mut stream, result)
             }
         }
@@ -2446,8 +2410,9 @@ mod tests {
         assert!(MONITOR_JS.contains("fetch(`/sound-mode?"));
         assert!(MONITOR_JS.contains("fetch(`/standalone-sound-mode?"));
         assert!(MONITOR_JS.contains("/velocity-curve"));
-        assert!(MONITOR_JS
-            .contains("reaperPurchasedInstruments=new Set([\"SK-EX\",\"Börsendorfer 280VC\"])"));
+        assert!(MONITOR_JS.contains(
+            "reaperPurchasedInstruments=new Set([\"SK-EX\",\"Bösendorfer VC\",\"Bösendorfer 280VC\"])"
+        ));
         assert!(MONITOR_JS.contains("reaper-free-presets"));
         assert!(MONITOR_JS.contains("reaper-demo-presets"));
         assert!(

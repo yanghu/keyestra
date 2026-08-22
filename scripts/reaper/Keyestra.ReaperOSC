@@ -15,6 +15,10 @@ TRACK_NAME s/track/@/name
 TRACK_MUTE b/track/@/mute
 FX_NAME s/track/@/fx/@/name
 FX_PRESET s/track/@/fx/@/preset
+# Expose labels as well as values so a controller can discover whether a
+# vendor feature (for example Pianoteq Parameter Freeze) is a VST parameter.
+# These are feedback-only; they do not alter FX state.
+FX_PARAM_NAME s/fxparam/@/name s/fx/@/fxparam/@/name
 FX_PARAM_VALUE n/fxparam/@/value n/fx/@/fxparam/@/value n/track/@/fx/@/fxparam/@/value
 
 # Keyestra sends these only after a named Pianoteq preset is loaded. Selecting

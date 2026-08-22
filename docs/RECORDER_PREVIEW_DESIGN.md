@@ -26,7 +26,7 @@ sound that differs from the user's real piano setup.
 ### Default preview output is `Keyestra MIDI`
 
 Preview defaults to the MIDI output whose name matches the monitored
-`Keyestra MIDI` input. This requires no new loopMIDI port and works with the sound
+`Keyestra MIDI` input. This requires no new MIDI Loopback 2.0 pair and works with the sound
 source the user already configured.
 
 Sending preview back through that virtual port also makes it return to the
@@ -597,7 +597,7 @@ Avoid brittle exact wall-clock tests.
 - Preview progress and repeated taps.
 - Network interruption and missing output.
 - ARIA sliders and keyboard use.
-- loopMIDI preview reaches the current sound source.
+- Windows MIDI Services MIDI Loopback 2.0 preview reaches the current sound source.
 - Playback events do not re-enter Recorder.
 - Active Take rejects preview.
 - Sustain crossing a boundary and manual Stop do not leave stuck notes.

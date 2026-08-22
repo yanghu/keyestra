@@ -40,7 +40,9 @@ IAC Driver 或其他已有的虚拟 MIDI 端口。
 - **力度曲线调整** — 主要 CLP 曲线把键盘的原始输入扩展成灵敏的完整 MIDI
   力度范围。
 - **安全的 MIDI 路由** — Note Off、延音踏板、CC、弯音、Program Change、
-  Channel Pressure、SysEx 和未知消息均原样通过。
+  Channel Pressure、SysEx 和未知消息均原样通过。Windows 托盘程序会省略
+  Active Sensing（`0xFE`）心跳，因为部分 Windows 虚拟 MIDI 端点会拒绝它；
+  独立运行时仍可选择转发。
 - **手机遥控** — 查看力度与和弦、控制节拍器、进行节奏练习和管理录音。
 - **滚动录音** — 找回最近的演奏、标记 Take、精确选择和试听片段，并导出
   标准 MIDI 文件。
@@ -55,7 +57,7 @@ IAC Driver 或其他已有的虚拟 MIDI 端口。
 完整的托盘和部署流程目前主要面向 Windows。从源码运行 Keyestra 需要：
 
 - 数码钢琴或 MIDI 键盘；
-- loopMIDI 等虚拟 MIDI 端口；
+- Windows MIDI Services 及 MIDI Loopback 2.0 端点；
 - 能接收映射后 MIDI 的软音源或 DAW；
 - 安装了 `cargo` 的 Rust 工具链。
 
@@ -139,9 +141,6 @@ localhost 的 JSON-RPC 服务：
 Keyestra 会按乐器整理普通和自定义 preset，优先显示已授权的琴，并把常用 preset
 按钮保存在手机浏览器中。Piano 页面还提供适合触控的音量、混响量、Room Size、
 Reverb 开关和 Dynamics 控制；这些调整只改变当前声音，不会另存 preset。
-独立的“练习触键”控制会在每次载入具名 Pianoteq host preset 后覆盖 Dynamics，
-而不改写原始 preset 文件；这个值由后台保存在
-`%APPDATA%\keyestra\user-settings.json`，所有手机共用。
 Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。若 Pianoteq 使用
 其他本机地址，可通过 `keyestra-monitor --pianoteq-rpc <主机:端口>` 指定。
 
@@ -152,11 +151,19 @@ Pianoteq RPC 不会暴露给局域网，手机仍只访问 Keyestra Monitor。�
 
 日常 Live 工程只需要 `Garritan CFX` 和一个可复用的 `Pianoteq Live` 轨道。
 **Piano** 标签页可以切换这两个轨道，载入整理过的 REAPER host preset，并直接
-调整 Pianoteq VST 的 Dynamics 和空间参数。小房间、Studio、Hall 等混响环境是
+调整 Pianoteq VST 的空间参数。小房间、Studio、Hall 等混响环境是
 独立场景，不会替换琴体 preset。页面顶部的全局声音开关在“琴体”模式打开
 Clavinova Local Control 并静音 REAPER Master；在“REAPER VST”模式恢复 Master
 并关闭 Local Control。这样 REAPER 始终是唯一的 ASIO 宿主。原有的 Pianoteq
 standalone RPC 高级控制仍保留在下方，但不是 Live 模式的依赖。
+
+后续的 `Pianoteq Live` 日常方案以 Pianoteq **内部 preset** 为声音来源：在
+Standalone 中编写 Global MIDI Mapping，再由 REAPER 内的 VST 接收 MIDI
+Program Change 切换。Mapping 配置会共享，但 **Parameter Freeze 不会共享**；
+Freeze 属于各自的 Pianoteq 实例。因此需要为 VST 单独映射明确的 Freeze 与
+Unfreeze 事件，不能期望 Standalone 的 Freeze 状态自动带入。REAPER OSC 则继续
+负责可暴露 VST 参数的精确微调。详见
+[REAPER Piano Compare 设置](docs/REAPER_PIANO_COMPARE.md#planned-live-pianoteq-internal-preset-architecture)。
 
 REAPER 工程布局、Web 界面和可配置钢琴列表的设置方法请参阅
 [REAPER Piano Compare 设置](docs/REAPER_PIANO_COMPARE.md)。其中包含可重复运行的
